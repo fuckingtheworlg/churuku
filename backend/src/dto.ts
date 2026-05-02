@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -190,6 +191,10 @@ export class PageQueryDto {
   categoryId?: number;
 
   @IsOptional()
+  @Transform(({ value }) => (value ? Number(value) : undefined))
+  itemId?: number;
+
+  @IsOptional()
   type?: StockType;
 
   @IsOptional()
@@ -201,6 +206,11 @@ export class PageQueryDto {
 
   @IsOptional()
   endDate?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  mine?: boolean;
 }
 
 export class UploadMarkerDto {

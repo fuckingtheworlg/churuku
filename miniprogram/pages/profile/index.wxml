@@ -4,5 +4,37 @@
     <view class="muted">部门：{{user.dept.name || '-'}}</view>
     <view class="muted">状态：{{user.status || '-'}}</view>
   </view>
+  <view class="section-title">我的出入库记录</view>
+  <view wx:for="{{records}}" wx:for-item="record" wx:for-index="recordIndex" wx:key="id" class="card">
+    <view class="row">
+      <view class="record-title">{{record.typeText}} · {{record.itemName}}</view>
+      <view class="muted">{{record.occurredAtText}}</view>
+    </view>
+    <view class="muted">数量：{{record.quantity}} {{record.unit}}</view>
+    <view class="muted">位置：{{record.poiName || record.address || '无位置'}}</view>
+    <view wx:if="{{record.previewUrls.length}}" class="thumbs">
+      <image
+        wx:for="{{record.photoUrls}}"
+        wx:for-item="photo"
+        wx:key="*this"
+        class="thumb"
+        src="{{photo}}"
+        mode="aspectFill"
+        data-index="{{recordIndex}}"
+        data-current="{{photo}}"
+        bindtap="previewImage"
+      />
+      <image
+        wx:if="{{record.signatureUrl}}"
+        class="thumb signature-thumb"
+        src="{{record.signatureUrl}}"
+        mode="aspectFit"
+        data-index="{{recordIndex}}"
+        data-current="{{record.signatureUrl}}"
+        bindtap="previewImage"
+      />
+    </view>
+  </view>
+  <view wx:if="{{!records.length}}" class="empty">暂无本人出入库记录</view>
   <button bindtap="logout">退出登录</button>
 </view>

@@ -6,11 +6,34 @@
     <view class="muted">存放位置：{{item.location || '未填写'}}</view>
   </view>
   <view class="section-title">历史记录</view>
-  <view wx:for="{{records}}" wx:key="id" class="card">
+  <view wx:for="{{records}}" wx:for-item="record" wx:for-index="recordIndex" wx:key="id" class="card">
     <view class="row">
-      <view>{{item.type === 'in' ? '入库' : '出库'}} {{item.quantity}} {{item.item.unit}}</view>
-      <view class="muted">{{item.occurredAtText}}</view>
+      <view>{{record.type === 'in' ? '入库' : '出库'}} {{record.quantity}} {{record.item.unit}}</view>
+      <view class="muted">{{record.occurredAtText}}</view>
     </view>
-    <view class="muted">{{item.poiName || item.address || '无位置'}}</view>
+    <view class="muted">{{record.operatorName || '未知责任人'}} · {{record.poiName || record.address || '无位置'}}</view>
+    <view wx:if="{{record.previewUrls.length}}" class="thumbs">
+      <image
+        wx:for="{{record.photoUrls}}"
+        wx:for-item="photo"
+        wx:key="*this"
+        class="thumb"
+        src="{{photo}}"
+        mode="aspectFill"
+        data-index="{{recordIndex}}"
+        data-current="{{photo}}"
+        bindtap="previewImage"
+      />
+      <image
+        wx:if="{{record.signatureUrl}}"
+        class="thumb signature-thumb"
+        src="{{record.signatureUrl}}"
+        mode="aspectFit"
+        data-index="{{recordIndex}}"
+        data-current="{{record.signatureUrl}}"
+        bindtap="previewImage"
+      />
+    </view>
   </view>
+  <view wx:if="{{!records.length}}" class="empty">暂无历史记录</view>
 </view>

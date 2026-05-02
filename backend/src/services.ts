@@ -372,6 +372,9 @@ export class AppService {
       .skip(skip)
       .take(take);
     this.applyRecordFilters(qb, deptId, query);
+    if (actor.role === 'mini' && query.mine) {
+      qb.andWhere('record.operatorUserId = :operatorUserId', { operatorUserId: actor.id });
+    }
     const [list, total] = await qb.getManyAndCount();
     return { list, total, page, pageSize };
   }
@@ -397,6 +400,7 @@ export class AppService {
     if (deptId) qb.andWhere('record.deptId = :deptId', { deptId });
     if (query.type) qb.andWhere('record.type = :type', { type: query.type });
     if (query.categoryId) qb.andWhere('item.categoryId = :categoryId', { categoryId: query.categoryId });
+    if (query.itemId) qb.andWhere('record.itemId = :itemId', { itemId: query.itemId });
     if (query.startDate) qb.andWhere('record.occurredAt >= :startDate', { startDate: `${query.startDate} 00:00:00` });
     if (query.endDate) qb.andWhere('record.occurredAt <= :endDate', { endDate: `${query.endDate} 23:59:59` });
     if (query.keyword) {
