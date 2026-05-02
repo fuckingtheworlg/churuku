@@ -1,0 +1,54 @@
+.toolbar input {
+  background: #fff;
+}
+
+.tabs {
+  display: flex;
+  gap: 16rpx;
+  margin: 20rpx 0;
+  overflow-x: auto;
+}
+
+.tab {
+  flex: none;
+  padding: 12rpx 24rpx;
+  border-radius: 999rpx;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.tab.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.name {
+  margin-bottom: 12rpx;
+  font-size: 34rpx;
+  font-weight: 600;
+}
+
+.qty {
+  color: #2563eb;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.empty {
+  padding: 80rpx 0;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.actions {
+  position: fixed;
+  right: 24rpx;
+  bottom: 140rpx;
+  left: 24rpx;
+  display: flex;
+  gap: 20rpx;
+}
+
+.actions button {
+  flex: 1;
+}

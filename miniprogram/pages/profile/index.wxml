@@ -1,0 +1,8 @@
+<view class="page">
+  <view class="card">
+    <view class="name">{{user.realName || '未登录'}}</view>
+    <view class="muted">部门：{{user.dept.name || '-'}}</view>
+    <view class="muted">状态：{{user.status || '-'}}</view>
+  </view>
+  <button bindtap="logout">退出登录</button>
+</view>

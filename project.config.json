@@ -1,0 +1,12 @@
+{
+  "appid": "wx820061268d79319d",
+  "projectname": "churuku",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "miniprogram/",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": true,
+    "minified": true
+  }
+}

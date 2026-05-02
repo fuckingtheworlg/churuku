@@ -1,0 +1,17 @@
+.name {
+  margin-bottom: 14rpx;
+  font-size: 40rpx;
+  font-weight: 700;
+}
+
+.qty {
+  margin: 20rpx 0;
+  color: #2563eb;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.section-title {
+  margin: 30rpx 0 18rpx;
+  font-weight: 700;
+}

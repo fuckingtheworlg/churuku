@@ -1,0 +1,39 @@
+{
+  "pages": [
+    "pages/login/index",
+    "pages/register/index",
+    "pages/pending/index",
+    "pages/index/index",
+    "pages/item/detail/index",
+    "pages/stock/form/index",
+    "pages/profile/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "Churuku",
+    "navigationBarBackgroundColor": "#2563eb",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f5f7fb"
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于出入库时记录位置"
+    }
+  },
+  "requiredPrivateInfos": ["chooseLocation", "getLocation"],
+  "tabBar": {
+    "color": "#64748b",
+    "selectedColor": "#2563eb",
+    "backgroundColor": "#ffffff",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "库存"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json"
+}

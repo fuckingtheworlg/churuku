@@ -1,0 +1,8 @@
+<view class="page login">
+  <view class="card hero">
+    <view class="title">Churuku 出入库</view>
+    <view class="muted">设备库存、定位、拍照、签字一体化记录</view>
+  </view>
+  <button class="btn-primary" loading="{{loading}}" bindtap="login">微信登录</button>
+  <view class="muted tip">首次使用需提交姓名和部门，管理员审批后才能操作库存。</view>
+</view>

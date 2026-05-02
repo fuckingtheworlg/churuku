@@ -1,0 +1,33 @@
+body {
+  margin: 0;
+  background: #f5f7fb;
+  color: #1f2937;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+}
+
+.page-card {
+  padding: 18px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 6px 22px rgb(15 23 42 / 6%);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.muted {
+  color: #64748b;
+}
+
+.image-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}

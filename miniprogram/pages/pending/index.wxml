@@ -1,0 +1,7 @@
+<view class="page pending">
+  <view class="card">
+    <view class="title">申请已提交</view>
+    <view class="muted">请等待管理员在后台审批，通过后重新登录即可操作库存。</view>
+  </view>
+  <button bindtap="retry">重新登录检查状态</button>
+</view>

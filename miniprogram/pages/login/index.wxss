@@ -1,0 +1,18 @@
+.login {
+  padding-top: 120rpx;
+}
+
+.hero {
+  text-align: center;
+}
+
+.title {
+  margin-bottom: 16rpx;
+  font-size: 44rpx;
+  font-weight: 700;
+}
+
+.tip {
+  margin-top: 28rpx;
+  text-align: center;
+}

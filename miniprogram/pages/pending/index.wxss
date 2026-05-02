@@ -1,0 +1,10 @@
+.pending {
+  padding-top: 120rpx;
+  text-align: center;
+}
+
+.title {
+  margin-bottom: 16rpx;
+  font-size: 40rpx;
+  font-weight: 700;
+}

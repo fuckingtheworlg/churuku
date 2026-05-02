@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "出入库",
+  "usingComponents": {
+    "signature-pad": "/components/signature/index"
+  }
+}

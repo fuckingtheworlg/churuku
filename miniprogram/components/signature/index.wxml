@@ -1,0 +1,13 @@
+<view class="signature">
+  <canvas
+    canvas-id="signatureCanvas"
+    class="canvas"
+    disable-scroll="true"
+    bindtouchstart="start"
+    bindtouchmove="move"
+  ></canvas>
+  <view class="row">
+    <text class="muted">请在上方签字</text>
+    <button size="mini" bindtap="clear">清空</button>
+  </view>
+</view>

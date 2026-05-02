@@ -1,0 +1,16 @@
+<view class="page" wx:if="{{item}}">
+  <view class="card">
+    <view class="name">{{item.name}}</view>
+    <view class="muted">{{item.spec || '无规格'}} · {{item.category.name || '未分类'}}</view>
+    <view class="qty">当前库存：{{item.quantity}} {{item.unit}}</view>
+    <view class="muted">存放位置：{{item.location || '未填写'}}</view>
+  </view>
+  <view class="section-title">历史记录</view>
+  <view wx:for="{{records}}" wx:key="id" class="card">
+    <view class="row">
+      <view>{{item.type === 'in' ? '入库' : '出库'}} {{item.quantity}} {{item.item.unit}}</view>
+      <view class="muted">{{item.occurredAtText}}</view>
+    </view>
+    <view class="muted">{{item.poiName || item.address || '无位置'}}</view>
+  </view>
+</view>

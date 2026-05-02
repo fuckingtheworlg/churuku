@@ -1,0 +1,5 @@
+.name {
+  margin-bottom: 16rpx;
+  font-size: 40rpx;
+  font-weight: 700;
+}
