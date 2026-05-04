@@ -1,4 +1,4 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -10,8 +10,9 @@ import {
   IsOptional,
   IsString,
   Min,
+  ValidateNested,
 } from 'class-validator';
-import { StockType, UserStatus } from './entities';
+import { AdminRole, StockType, UserStatus } from './entities';
 
 export class LoginDto {
   @IsString()
@@ -70,9 +71,35 @@ export class DeptDto {
   code: string;
 }
 
+export class AdminAccountDto {
+  @IsString()
+  username: string;
+
+  @IsOptional()
+  @IsString()
+  password?: string;
+
+  @IsEnum(AdminRole)
+  role: AdminRole;
+
+  @IsOptional()
+  @Transform(({ value }) => (value ? Number(value) : undefined))
+  deptId?: number;
+}
+
 export class UserStatusDto {
   @IsEnum(UserStatus)
   status: UserStatus;
+}
+
+export class GlobalCategoryDto {
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsInt()
+  @Transform(({ value }) => Number(value))
+  sort?: number;
 }
 
 export class CategoryDto {
@@ -82,6 +109,10 @@ export class CategoryDto {
 
   @IsString()
   name: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value ? Number(value) : undefined))
+  globalCategoryId?: number;
 
   @IsOptional()
   @IsInt()
@@ -123,18 +154,40 @@ export class ItemDto {
   image?: string;
 }
 
-export class StockRecordDto {
+export class StockRecordItemDto {
   @IsInt()
   @Transform(({ value }) => Number(value))
   itemId: number;
-
-  @IsEnum(StockType)
-  type: StockType;
 
   @IsInt()
   @Min(1)
   @Transform(({ value }) => Number(value))
   quantity: number;
+}
+
+export class StockRecordDto {
+  @IsOptional()
+  @IsInt()
+  @Transform(({ value }) => Number(value))
+  itemId?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StockRecordItemDto)
+  items?: StockRecordItemDto[];
+
+  @IsEnum(StockType)
+  type: StockType;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Transform(({ value }) => Number(value))
+  quantity?: number;
+
+  @IsString()
+  projectName: string;
 
   @IsOptional()
   @IsNumber()

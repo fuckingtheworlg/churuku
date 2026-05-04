@@ -8,9 +8,11 @@
   <view class="section-title">历史记录</view>
   <view wx:for="{{records}}" wx:for-item="record" wx:for-index="recordIndex" wx:key="id" class="card">
     <view class="row">
-      <view>{{record.type === 'in' ? '入库' : '出库'}} {{record.quantity}} {{record.item.unit}}</view>
+      <view>{{record.type === 'in' ? '入库' : '出库'}} {{record.displayQuantity}} {{record.displayUnit}}</view>
       <view class="muted">{{record.occurredAtText}}</view>
     </view>
+    <view class="muted">项目：{{record.projectName || '-'}}</view>
+    <view class="muted">单据明细：{{record.itemSummary}}</view>
     <view class="muted">{{record.operatorName || '未知责任人'}} · {{record.poiName || record.address || '无位置'}}</view>
     <view wx:if="{{record.previewUrls.length}}" class="thumbs">
       <image

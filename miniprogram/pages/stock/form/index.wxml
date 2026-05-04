@@ -5,14 +5,19 @@
       <view class="type">{{type === 'in' ? '入库' : '出库'}}</view>
     </view>
     <view class="field">
-      <view class="label">物品</view>
-      <picker range="{{itemNames}}" value="{{itemIndex}}" bindchange="onItemChange">
-        <view>{{ itemNames[itemIndex] || '请选择物品' }}</view>
-      </picker>
+      <view class="label">项目名称</view>
+      <input value="{{projectName}}" placeholder="请输入项目名称" bindinput="onProjectName" />
     </view>
     <view class="field">
-      <view class="label">数量</view>
-      <input type="number" value="{{quantity}}" placeholder="请输入数量" bindinput="onQuantity" />
+      <view class="label">设备明细</view>
+      <view wx:for="{{lines}}" wx:for-item="line" wx:for-index="lineIndex" wx:key="*this" class="line-card">
+        <picker range="{{itemNames}}" value="{{line.itemIndex}}" data-index="{{lineIndex}}" bindchange="onLineItemChange">
+          <view>{{ itemNames[line.itemIndex] || '请选择物品' }}</view>
+        </picker>
+        <input type="number" value="{{line.quantity}}" placeholder="请输入数量" data-index="{{lineIndex}}" bindinput="onLineQuantity" />
+        <button wx:if="{{lines.length > 1}}" size="mini" data-index="{{lineIndex}}" bindtap="removeLine">删除</button>
+      </view>
+      <button size="mini" bindtap="addLine">添加设备</button>
     </view>
     <view class="field">
       <view class="label">位置</view>

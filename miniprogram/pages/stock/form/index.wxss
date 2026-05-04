@@ -11,6 +11,15 @@
   background: #f8fafc;
 }
 
+.line-card {
+  display: grid;
+  gap: 14rpx;
+  margin-bottom: 18rpx;
+  padding: 18rpx;
+  border-radius: 12rpx;
+  background: #f8fafc;
+}
+
 .photos {
   display: flex;
   flex-wrap: wrap;

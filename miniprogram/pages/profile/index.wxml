@@ -10,7 +10,8 @@
       <view class="record-title">{{record.typeText}} · {{record.itemName}}</view>
       <view class="muted">{{record.occurredAtText}}</view>
     </view>
-    <view class="muted">数量：{{record.quantity}} {{record.unit}}</view>
+    <view class="muted">项目：{{record.projectName || '-'}}</view>
+    <view class="muted">合计数量：{{record.quantity}}</view>
     <view class="muted">位置：{{record.poiName || record.address || '无位置'}}</view>
     <view wx:if="{{record.previewUrls.length}}" class="thumbs">
       <image

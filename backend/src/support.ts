@@ -15,7 +15,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Request, Response } from 'express';
 import { Observable, map } from 'rxjs';
 import { Repository } from 'typeorm';
-import { AdminEntity, UserEntity, UserStatus } from './entities';
+import { AdminEntity, AdminRole, UserEntity, UserStatus } from './entities';
 
 export type ActorRole = 'admin' | 'mini';
 
@@ -24,6 +24,7 @@ export interface JwtActor {
   id: number;
   deptId?: number;
   username?: string;
+  adminRole?: AdminRole;
   realName?: string;
 }
 
@@ -101,7 +102,12 @@ export class AdminGuard implements CanActivate {
     if (!admin) {
       throw new UnauthorizedException('管理员不存在');
     }
-    req.actor = payload;
+    req.actor = {
+      ...payload,
+      adminRole: admin.role,
+      deptId: admin.role === AdminRole.Dept ? admin.deptId : payload.deptId,
+      username: admin.username,
+    };
     return true;
   }
 }
@@ -138,6 +144,9 @@ export function requireActor(req: AuthedRequest) {
 
 export function resolveDeptId(actor: JwtActor, deptId?: number | string) {
   if (actor.role === 'mini') {
+    return Number(actor.deptId);
+  }
+  if (actor.role === 'admin' && actor.adminRole === AdminRole.Dept) {
     return Number(actor.deptId);
   }
   const value = Number(deptId || 0);

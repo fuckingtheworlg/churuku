@@ -30,6 +30,23 @@ export interface Dept {
   code: string;
 }
 
+export interface AdminAccount {
+  id: number;
+  username: string;
+  role: 'super' | 'dept';
+  deptId?: number;
+  dept?: Dept;
+  mustChangePassword?: boolean;
+  createdAt?: string;
+}
+
+export interface GlobalCategory {
+  id: number;
+  name: string;
+  sort: number;
+  usedCount?: number;
+}
+
 export interface Item {
   id: number;
   deptId: number;
@@ -57,7 +74,10 @@ export interface User {
 export interface StockRecord {
   id: number;
   type: 'in' | 'out';
+  projectName?: string;
   quantity: number;
+  itemSummary?: string;
+  items?: Array<{ id: number; itemId: number; quantity: number; item?: Item }>;
   operatorName?: string;
   latitude?: string;
   longitude?: string;
@@ -73,22 +93,32 @@ export interface StockRecord {
 
 export const api = {
   adminLogin: (data: { username: string; password: string }) => request.post('/auth/admin-login', data),
+  adminMe: () => request.get('/auth/admin-me'),
   changePassword: (data: { oldPassword: string; newPassword: string }) => request.patch('/auth/password', data),
   dashboard: () => request.get('/dashboard'),
   depts: () => request.get('/dept'),
+  admins: () => request.get('/admin'),
+  saveAdmin: (data: Record<string, unknown>, id?: number) =>
+    id ? request.patch(`/admin/${id}`, data) : request.post('/admin', data),
+  deleteAdmin: (id: number) => request.delete(`/admin/${id}`),
+  globalCategories: () => request.get('/global-item-category'),
+  saveGlobalCategory: (data: Record<string, unknown>, id?: number) =>
+    id ? request.patch(`/global-item-category/${id}`, data) : request.post('/global-item-category', data),
+  deleteGlobalCategory: (id: number, force = false) => request.delete(`/global-item-category/${id}`, { params: { force } }),
   createDept: (data: Partial<Dept>) => request.post('/dept', data),
   updateDept: (id: number, data: Partial<Dept>) => request.patch(`/dept/${id}`, data),
-  deleteDept: (id: number) => request.delete(`/dept/${id}`),
+  deleteDept: (id: number, force = false) => request.delete(`/dept/${id}`, { params: { force } }),
   users: (params: Record<string, unknown>) => request.get('/user', { params }),
   updateUserStatus: (id: number, status: User['status']) => request.patch(`/user/${id}/status`, { status }),
+  deleteUser: (id: number) => request.delete(`/user/${id}`),
   categories: (deptId?: number) => request.get('/item-category', { params: { deptId } }),
   saveCategory: (data: Record<string, unknown>, id?: number) =>
     id ? request.patch(`/item-category/${id}`, data) : request.post('/item-category', data),
-  deleteCategory: (id: number) => request.delete(`/item-category/${id}`),
+  deleteCategory: (id: number, force = false) => request.delete(`/item-category/${id}`, { params: { force } }),
   items: (params: Record<string, unknown>) => request.get('/item', { params }),
   saveItem: (data: Record<string, unknown>, id?: number) =>
     id ? request.patch(`/item/${id}`, data) : request.post('/item', data),
-  deleteItem: (id: number) => request.delete(`/item/${id}`),
+  deleteItem: (id: number, force = false) => request.delete(`/item/${id}`, { params: { force } }),
   records: (params: Record<string, unknown>) => request.get('/stock-record', { params }),
   upload: (file: File) => {
     const body = new FormData();

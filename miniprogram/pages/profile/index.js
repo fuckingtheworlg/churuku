@@ -11,7 +11,7 @@ function presentRecord(record) {
   const signatureUrl = asset(record.signatureUrl);
   return {
     ...record,
-    itemName: item.name || '未知物品',
+    itemName: record.itemSummary || item.name || '未知物品',
     unit: item.unit || '件',
     typeText: record.type === 'in' ? '入库' : '出库',
     photoUrls,

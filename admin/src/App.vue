@@ -19,7 +19,9 @@
       <h2>Churuku</h2>
       <el-menu :default-active="active" @select="active = $event">
         <el-menu-item index="dashboard">仪表盘</el-menu-item>
-        <el-menu-item index="dept">部门</el-menu-item>
+        <el-menu-item v-if="isSuperAdmin" index="dept">部门</el-menu-item>
+        <el-menu-item v-if="isSuperAdmin" index="admin">部门后台账号</el-menu-item>
+        <el-menu-item v-if="isSuperAdmin" index="globalCategory">总物品分类</el-menu-item>
         <el-menu-item index="user">用户审批</el-menu-item>
         <el-menu-item index="category">库存类目</el-menu-item>
         <el-menu-item index="item">物品库存</el-menu-item>
@@ -30,14 +32,17 @@
     <el-container>
       <el-header class="header">
         <span>{{ titleMap[active] }}</span>
+        <span class="muted">{{ currentAdmin?.role === 'dept' ? currentAdmin.dept?.name || '部门后台' : '超级管理员' }}</span>
         <el-button link type="danger" @click="logout">退出</el-button>
       </el-header>
       <el-main>
         <Dashboard v-if="active === 'dashboard'" />
-        <DeptPage v-else-if="active === 'dept'" @changed="refreshOptions" />
+        <DeptPage v-else-if="active === 'dept'" :is-super="isSuperAdmin" @changed="refreshOptions" />
+        <AdminPage v-else-if="active === 'admin'" :depts="depts" />
+        <GlobalCategoryPage v-else-if="active === 'globalCategory'" />
         <UserPage v-else-if="active === 'user'" :depts="depts" />
-        <CategoryPage v-else-if="active === 'category'" :depts="depts" />
-        <ItemPage v-else-if="active === 'item'" :depts="depts" />
+        <CategoryPage v-else-if="active === 'category'" :depts="depts" :is-super="isSuperAdmin" />
+        <ItemPage v-else-if="active === 'item'" :depts="depts" :is-super="isSuperAdmin" />
         <RecordPage v-else-if="active === 'record'" :depts="depts" />
         <PasswordPage v-else />
       </el-main>
@@ -48,17 +53,21 @@
 <script setup lang="ts">
 import dayjs from 'dayjs';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { defineComponent, h, onMounted, reactive, ref, watch } from 'vue';
-import { api, Dept, Item, StockRecord, User } from './api';
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue';
+import { AdminAccount, api, Dept, GlobalCategory, Item, StockRecord, User } from './api';
 
 const token = ref(localStorage.getItem('admin_token') || '');
 const loading = ref(false);
 const active = ref('dashboard');
 const depts = ref<Dept[]>([]);
+const currentAdmin = ref<AdminAccount | null>(null);
+const isSuperAdmin = computed(() => currentAdmin.value?.role !== 'dept');
 const loginForm = reactive({ username: 'admin', password: 'admin123' });
 const titleMap: Record<string, string> = {
   dashboard: '仪表盘',
   dept: '部门管理',
+  admin: '部门后台账号',
+  globalCategory: '总物品分类',
   user: '用户审批',
   category: '库存类目',
   item: '物品库存',
@@ -71,6 +80,7 @@ async function login() {
   try {
     const res: any = await api.adminLogin(loginForm);
     localStorage.setItem('admin_token', res.token);
+    currentAdmin.value = res.user;
     token.value = res.token;
     await refreshOptions();
   } catch (error: any) {
@@ -82,11 +92,17 @@ async function login() {
 
 function logout() {
   localStorage.removeItem('admin_token');
+  currentAdmin.value = null;
   token.value = '';
 }
 
 async function refreshOptions() {
   if (!token.value) return;
+  const me: any = await api.adminMe();
+  currentAdmin.value = me.user;
+  if (currentAdmin.value?.role === 'dept' && ['dept', 'admin', 'globalCategory'].includes(active.value)) {
+    active.value = 'dashboard';
+  }
   depts.value = await api.depts();
 }
 
@@ -117,8 +133,9 @@ function uniqueTextOptions(values: Array<string | undefined | null>, preset: str
 }
 
 const DeptPage = defineComponent({
+  props: { isSuper: { type: Boolean, default: false } },
   emits: ['changed'],
-  setup(_, { emit }) {
+  setup(props, { emit }) {
     const list = ref<Dept[]>([]);
     const form = reactive({ id: 0, name: '', code: '' });
     async function load() {
@@ -133,12 +150,21 @@ const DeptPage = defineComponent({
       await load();
     }
     async function remove(row: Dept) {
-      await ElMessageBox.confirm(`确定删除部门 ${row.name}？`);
+      await ElMessageBox.confirm(`确定删除部门 ${row.name}？仅空部门可删除。`);
       await api.deleteDept(row.id);
       await load();
     }
+    async function forceRemove(row: Dept) {
+      await ElMessageBox.confirm(
+        `强制删除部门 ${row.name} 会删除该部门下人员、分类、物品和历史流水，无法恢复。确认继续？`,
+        '危险操作',
+        { type: 'warning' },
+      );
+      await api.deleteDept(row.id, true);
+      await load();
+    }
     onMounted(load);
-    return { list, form, save, remove };
+    return { props, list, form, save, remove, forceRemove };
   },
   template: `
     <div class="page-card">
@@ -155,6 +181,126 @@ const DeptPage = defineComponent({
           <template #default="{ row }">
             <el-button link type="primary" @click="Object.assign(form,row)">编辑</el-button>
             <el-button link type="danger" @click="remove(row)">删除</el-button>
+            <el-button v-if="props.isSuper" link type="danger" @click="forceRemove(row)">强制删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>`,
+});
+
+const AdminPage = defineComponent({
+  props: { depts: { type: Array as () => Dept[], required: true } },
+  setup(props) {
+    const list = ref<AdminAccount[]>([]);
+    const form = reactive<any>({ id: 0, username: '', password: '', role: 'dept', deptId: undefined });
+    async function load() {
+      list.value = await api.admins();
+    }
+    async function save() {
+      if (!form.username) return ElMessage.warning('请填写账号');
+      if (form.role === 'dept' && !form.deptId) return ElMessage.warning('请选择绑定部门');
+      if (!form.id && !form.password) return ElMessage.warning('请填写初始密码');
+      const roleText = form.role === 'super' ? '超级管理员' : '部门管理员';
+      await ElMessageBox.confirm(
+        `${form.id ? '更新' : '新增'}后台账号 ${form.username}，角色为${roleText}。确认继续？`,
+        '账号权限确认',
+        { type: 'warning' },
+      );
+      await api.saveAdmin({ username: form.username, password: form.password || undefined, role: form.role, deptId: form.deptId }, form.id || undefined);
+      Object.assign(form, { id: 0, username: '', password: '', role: 'dept', deptId: undefined });
+      ElMessage.success('账号已保存');
+      await load();
+    }
+    async function remove(row: AdminAccount) {
+      await ElMessageBox.confirm(`确定删除后台账号 ${row.username}？`);
+      await api.deleteAdmin(row.id);
+      await load();
+    }
+    function edit(row: AdminAccount) {
+      Object.assign(form, { id: row.id, username: row.username, password: '', role: row.role, deptId: row.deptId });
+    }
+    onMounted(load);
+    return { props, list, form, load, save, remove, edit };
+  },
+  template: `
+    <div class="page-card">
+      <div class="toolbar">
+        <el-input v-model="form.username" placeholder="后台账号" style="width:180px" />
+        <el-input v-model="form.password" placeholder="密码（编辑时不填则不改）" type="password" show-password style="width:220px" />
+        <el-select v-model="form.role" placeholder="角色" style="width:150px">
+          <el-option label="超级管理员" value="super" />
+          <el-option label="部门管理员" value="dept" />
+        </el-select>
+        <el-select v-if="form.role==='dept'" v-model="form.deptId" filterable clearable placeholder="绑定部门" style="width:200px">
+          <el-option v-for="d in props.depts" :key="d.id" :label="d.name" :value="d.id" />
+        </el-select>
+        <el-button type="primary" @click="save">{{ form.id ? '更新' : '新增' }}</el-button>
+        <el-button @click="Object.assign(form,{id:0,username:'',password:'',role:'dept',deptId:undefined})">清空</el-button>
+      </div>
+      <p class="muted">部门管理员登录后只能看到并管理绑定部门的数据；超级管理员可查看全部部门。</p>
+      <el-table :data="list">
+        <el-table-column prop="username" label="账号" />
+        <el-table-column label="角色"><template #default="{row}">{{ row.role === 'super' ? '超级管理员' : '部门管理员' }}</template></el-table-column>
+        <el-table-column label="绑定部门"><template #default="{row}">{{ row.dept?.name || '-' }}</template></el-table-column>
+        <el-table-column label="操作" width="180">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="edit(row)">编辑</el-button>
+            <el-button link type="danger" @click="remove(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>`,
+});
+
+const GlobalCategoryPage = defineComponent({
+  setup() {
+    const list = ref<GlobalCategory[]>([]);
+    const form = reactive({ id: 0, name: '', sort: 0 });
+    async function load() {
+      list.value = await api.globalCategories();
+    }
+    async function save() {
+      if (!form.name) return ElMessage.warning('请填写总分类名称');
+      await api.saveGlobalCategory({ name: form.name, sort: form.sort }, form.id || undefined);
+      Object.assign(form, { id: 0, name: '', sort: 0 });
+      ElMessage.success('总分类已保存');
+      await load();
+    }
+    async function remove(row: GlobalCategory) {
+      await ElMessageBox.confirm(`确定删除总分类 ${row.name}？已被部门使用时不允许普通删除。`);
+      await api.deleteGlobalCategory(row.id);
+      await load();
+    }
+    async function forceRemove(row: GlobalCategory) {
+      await ElMessageBox.confirm(
+        `强制删除总分类 ${row.name} 会解除它与部门分类的关联，但不会删除部门分类和物品。确认继续？`,
+        '危险操作',
+        { type: 'warning' },
+      );
+      await api.deleteGlobalCategory(row.id, true);
+      await load();
+    }
+    onMounted(load);
+    return { list, form, save, remove, forceRemove };
+  },
+  template: `
+    <div class="page-card">
+      <div class="toolbar">
+        <el-input v-model="form.name" placeholder="总分类名称" style="width:220px" />
+        <el-input-number v-model="form.sort" placeholder="排序" />
+        <el-button type="primary" @click="save">{{ form.id ? '更新' : '新增' }}</el-button>
+        <el-button @click="Object.assign(form,{id:0,name:'',sort:0})">清空</el-button>
+      </div>
+      <p class="muted">总分类是模板。部门分类删除不会影响总分类；这里的“使用部门数”用于体现哪些总分类已被部门采用。</p>
+      <el-table :data="list">
+        <el-table-column prop="name" label="总分类" />
+        <el-table-column prop="sort" label="排序" />
+        <el-table-column prop="usedCount" label="使用部门数" />
+        <el-table-column label="操作" width="240">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="Object.assign(form,row)">编辑</el-button>
+            <el-button link type="danger" @click="remove(row)">删除</el-button>
+            <el-button link type="danger" @click="forceRemove(row)">强制删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -177,12 +323,23 @@ const UserPage = defineComponent({
       users.value = res.list;
     }
     async function setStatus(row: User, status: User['status']) {
+      const statusText = status === 'active' ? '通过' : status === 'pending' ? '设为待审' : '禁用';
+      await ElMessageBox.confirm(
+        `确定将人员 ${row.realName} ${statusText}？该操作会影响其小程序登录和出入库权限。`,
+        '人员权限确认',
+        { type: 'warning' },
+      );
       await api.updateUserStatus(row.id, status);
       ElMessage.success('已更新');
       await load();
     }
+    async function remove(row: User) {
+      await ElMessageBox.confirm(`确定删除人员 ${row.realName}？历史流水中的责任人姓名会保留。`);
+      await api.deleteUser(row.id);
+      await load();
+    }
     onMounted(load);
-    return { props, users, query, load, setStatus, dayjs };
+    return { props, users, query, load, setStatus, remove, dayjs };
   },
   template: `
     <div class="page-card">
@@ -209,6 +366,7 @@ const UserPage = defineComponent({
             <el-button link type="success" @click="setStatus(row,'active')">通过</el-button>
             <el-button link type="warning" @click="setStatus(row,'pending')">待审</el-button>
             <el-button link type="danger" @click="setStatus(row,'disabled')">禁用</el-button>
+            <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -216,10 +374,11 @@ const UserPage = defineComponent({
 });
 
 const CategoryPage = defineComponent({
-  props: { depts: { type: Array as () => Dept[], required: true } },
+  props: { depts: { type: Array as () => Dept[], required: true }, isSuper: { type: Boolean, default: false } },
   setup(props) {
     const list = ref<any[]>([]);
-    const form = reactive({ id: 0, deptId: 0, name: '', sort: 0 });
+    const globalCategories = ref<GlobalCategory[]>([]);
+    const form = reactive({ id: 0, deptId: 0, globalCategoryId: undefined as number | undefined, name: '', sort: 0 });
     function ensureDeptSelected() {
       if (!form.deptId && props.depts.length > 0) {
         form.deptId = props.depts[0].id;
@@ -227,18 +386,37 @@ const CategoryPage = defineComponent({
     }
     async function load() {
       ensureDeptSelected();
-      list.value = await api.categories(form.deptId || undefined);
+      const [categories, globals] = await Promise.all([
+        api.categories(form.deptId || undefined),
+        api.globalCategories(),
+      ]);
+      list.value = categories;
+      globalCategories.value = globals;
+    }
+    function onGlobalCategoryChange() {
+      const current = globalCategories.value.find((item) => item.id === form.globalCategoryId);
+      if (current) form.name = current.name;
     }
     async function save() {
       if (!props.depts.length) return ElMessage.warning('请先在部门管理中新增部门');
       if (!form.deptId || !form.name) return ElMessage.warning('请选择所属部门/仓库并填写类目名称');
-      await api.saveCategory({ deptId: form.deptId, name: form.name, sort: form.sort }, form.id || undefined);
-      Object.assign(form, { id: 0, name: '', sort: 0 });
+      await api.saveCategory({ deptId: form.deptId, globalCategoryId: form.globalCategoryId, name: form.name, sort: form.sort }, form.id || undefined);
+      Object.assign(form, { id: 0, globalCategoryId: undefined, name: '', sort: 0 });
       ElMessage.success('类目已保存');
       await load();
     }
     async function remove(row: any) {
+      await ElMessageBox.confirm(`确定删除部门分类 ${row.name}？仅分类下没有物品时可删除，总分类不会被删除。`);
       await api.deleteCategory(row.id);
+      await load();
+    }
+    async function forceRemove(row: any) {
+      await ElMessageBox.confirm(
+        `强制删除分类 ${row.name} 会删除分类下物品及相关历史流水，无法恢复。确认继续？`,
+        '危险操作',
+        { type: 'warning' },
+      );
+      await api.deleteCategory(row.id, true);
       await load();
     }
     watch(
@@ -247,7 +425,7 @@ const CategoryPage = defineComponent({
       { deep: true },
     );
     onMounted(load);
-    return { props, list, form, load, save, remove };
+    return { props, list, globalCategories, form, load, save, remove, forceRemove, onGlobalCategoryChange };
   },
   template: `
     <div class="page-card">
@@ -255,6 +433,9 @@ const CategoryPage = defineComponent({
         <span class="muted">所属部门/仓库</span>
         <el-select v-model="form.deptId" filterable clearable placeholder="请选择该类目所属部门/仓库" style="width:260px" @change="load" @clear="load">
           <el-option v-for="d in props.depts" :key="d.id" :label="d.name" :value="d.id" />
+        </el-select>
+        <el-select v-model="form.globalCategoryId" filterable clearable placeholder="可选：关联总分类" style="width:220px" @change="onGlobalCategoryChange">
+          <el-option v-for="c in globalCategories" :key="c.id" :label="c.name" :value="c.id" />
         </el-select>
         <el-select
           v-model="form.name"
@@ -274,17 +455,19 @@ const CategoryPage = defineComponent({
       <el-table :data="list">
         <el-table-column label="部门"><template #default="{row}">{{ row.dept?.name }}</template></el-table-column>
         <el-table-column prop="name" label="类目" />
+        <el-table-column label="总分类"><template #default="{row}">{{ row.globalCategory?.name || '-' }}</template></el-table-column>
         <el-table-column prop="sort" label="排序" />
         <el-table-column label="操作"><template #default="{row}">
-          <el-button link type="primary" @click="Object.assign(form,row)">编辑</el-button>
+          <el-button link type="primary" @click="Object.assign(form,{...row,globalCategoryId:row.globalCategoryId})">编辑</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
+          <el-button v-if="props.isSuper" link type="danger" @click="forceRemove(row)">强制删除</el-button>
         </template></el-table-column>
       </el-table>
     </div>`,
 });
 
 const ItemPage = defineComponent({
-  props: { depts: { type: Array as () => Dept[], required: true } },
+  props: { depts: { type: Array as () => Dept[], required: true }, isSuper: { type: Boolean, default: false } },
   setup(props) {
     const items = ref<Item[]>([]);
     const categories = ref<any[]>([]);
@@ -336,14 +519,24 @@ const ItemPage = defineComponent({
       await load();
     }
     async function remove(row: Item) {
+      await ElMessageBox.confirm(`确定删除物品 ${row.name}？仅没有历史记录的物品可普通删除。`);
       await api.deleteItem(row.id);
+      await load();
+    }
+    async function forceRemove(row: Item) {
+      await ElMessageBox.confirm(
+        `强制删除物品 ${row.name} 会删除相关历史流水，无法恢复。确认继续？`,
+        '危险操作',
+        { type: 'warning' },
+      );
+      await api.deleteItem(row.id, true);
       await load();
     }
     onMounted(async () => {
       await loadQueryCategories();
       await load();
     });
-    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove };
+    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove };
   },
   template: `
     <div class="page-card">
@@ -369,6 +562,7 @@ const ItemPage = defineComponent({
         <el-table-column label="操作" width="160"><template #default="{row}">
           <el-button link type="primary" @click="open(row)">编辑</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
+          <el-button v-if="props.isSuper" link type="danger" @click="forceRemove(row)">强制删除</el-button>
         </template></el-table-column>
       </el-table>
       <el-dialog v-model="dialog" title="物品">
@@ -426,7 +620,7 @@ const RecordPage = defineComponent({
       <div class="toolbar">
         <el-select v-model="query.deptId" filterable clearable placeholder="部门/仓库" style="width:180px" @change="load" @clear="load"><el-option v-for="d in props.depts" :key="d.id" :label="d.name" :value="d.id" /></el-select>
         <el-select v-model="query.type" filterable clearable placeholder="类型" style="width:120px" @change="load" @clear="load"><el-option label="入库" value="in" /><el-option label="出库" value="out" /></el-select>
-        <el-input v-model="query.keyword" clearable placeholder="物品/操作人/地址" style="width:220px" @keyup.enter="load" />
+        <el-input v-model="query.keyword" clearable placeholder="项目/物品/操作人/地址" style="width:240px" @keyup.enter="load" />
         <el-date-picker v-model="query.startDate" clearable type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
         <el-date-picker v-model="query.endDate" clearable type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
         <el-button @click="load">查询</el-button>
@@ -437,18 +631,25 @@ const RecordPage = defineComponent({
       <el-table :data="records">
         <el-table-column label="日期" width="150"><template #default="{row}">{{ dayjs(row.occurredAt).format('YYYY-MM-DD HH:mm') }}</template></el-table-column>
         <el-table-column label="部门"><template #default="{row}">{{ row.dept?.name }}</template></el-table-column>
-        <el-table-column label="物品"><template #default="{row}">{{ row.item?.name }}</template></el-table-column>
+        <el-table-column prop="projectName" label="项目名称" />
+        <el-table-column label="物品明细" min-width="260"><template #default="{row}">{{ row.itemSummary }}</template></el-table-column>
         <el-table-column label="类型"><template #default="{row}"><el-tag :type="row.type==='in'?'success':'warning'">{{ row.type==='in'?'入库':'出库' }}</el-tag></template></el-table-column>
-        <el-table-column prop="quantity" label="数量" />
+        <el-table-column prop="quantity" label="合计数量" />
         <el-table-column prop="operatorName" label="操作人" />
         <el-table-column label="位置"><template #default="{row}">{{ row.poiName || row.address }}</template></el-table-column>
         <el-table-column label="操作" width="220"><template #default="{row}">
-          <el-button link type="primary" @click="detail=row">查看图片/签字</el-button>
+          <el-button link type="primary" @click="detail=row">查看详情</el-button>
           <el-button link type="success" @click="openMap(row)">查看位置</el-button>
         </template></el-table-column>
       </el-table>
-      <el-dialog :model-value="!!detail" title="附件" @close="detail=null">
+      <el-dialog :model-value="!!detail" title="出入库详情" @close="detail=null">
         <template v-if="detail">
+          <p><b>项目名称：</b>{{ detail.projectName }}</p>
+          <el-table :data="detail.items || []" size="small" style="margin-bottom:16px">
+            <el-table-column label="物品"><template #default="{row}">{{ row.item?.name }}</template></el-table-column>
+            <el-table-column label="规格"><template #default="{row}">{{ row.item?.spec }}</template></el-table-column>
+            <el-table-column label="数量"><template #default="{row}">{{ row.quantity }} {{ row.item?.unit }}</template></el-table-column>
+          </el-table>
           <p>{{ detail.poiName }} {{ detail.address }} {{ detail.longitude }},{{ detail.latitude }}</p>
           <div class="image-list">
             <el-image v-for="p in detail.photos || []" :key="p" :src="p" style="width:120px;height:120px" fit="cover" :preview-src-list="detail.photos" />

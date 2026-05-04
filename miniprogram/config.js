@@ -1,4 +1,4 @@
 module.exports = {
-  API_BASE: 'http://localhost:3000/api',
-  ASSET_BASE: 'http://localhost:3000',
+  API_BASE: 'http://60.205.212.68/api',
+  ASSET_BASE: 'http://60.205.212.68',
 };

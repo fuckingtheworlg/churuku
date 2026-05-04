@@ -19,9 +19,11 @@ import { mkdirSync } from 'fs';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import {
+  AdminAccountDto,
   CategoryDto,
   ChangePasswordDto,
   DeptDto,
+  GlobalCategoryDto,
   ItemDto,
   LoginDto,
   PageQueryDto,
@@ -65,6 +67,12 @@ export class AppController {
   }
 
   @UseGuards(AdminGuard)
+  @Get('auth/admin-me')
+  adminMe(@Req() req: AuthedRequest) {
+    return this.service.me(requireActor(req));
+  }
+
+  @UseGuards(AdminGuard)
   @Patch('auth/password')
   changePassword(@Req() req: AuthedRequest, @Body() dto: ChangePasswordDto) {
     return this.service.changePassword(requireActor(req), dto);
@@ -88,8 +96,8 @@ export class AppController {
 
   @UseGuards(AdminGuard)
   @Get('dashboard')
-  dashboard() {
-    return this.service.dashboard();
+  dashboard(@Req() req: AuthedRequest) {
+    return this.service.dashboard(requireActor(req));
   }
 
   @Get('public/dept')
@@ -99,38 +107,92 @@ export class AppController {
 
   @UseGuards(AdminGuard)
   @Get('dept')
-  listDept() {
-    return this.service.listDept();
+  listDept(@Req() req: AuthedRequest) {
+    return this.service.listDept(requireActor(req));
   }
 
   @UseGuards(AdminGuard)
   @Post('dept')
-  createDept(@Body() dto: DeptDto) {
-    return this.service.createDept(dto);
+  createDept(@Req() req: AuthedRequest, @Body() dto: DeptDto) {
+    return this.service.createDept(requireActor(req), dto);
   }
 
   @UseGuards(AdminGuard)
   @Patch('dept/:id')
-  updateDept(@Param('id') id: string, @Body() dto: DeptDto) {
-    return this.service.updateDept(Number(id), dto);
+  updateDept(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: DeptDto) {
+    return this.service.updateDept(requireActor(req), Number(id), dto);
   }
 
   @UseGuards(AdminGuard)
   @Delete('dept/:id')
-  deleteDept(@Param('id') id: string) {
-    return this.service.deleteDept(Number(id));
+  deleteDept(@Req() req: AuthedRequest, @Param('id') id: string, @Query('force') force?: string) {
+    return this.service.deleteDept(requireActor(req), Number(id), force === 'true');
+  }
+
+  @UseGuards(AdminGuard)
+  @Get('global-item-category')
+  listGlobalCategory() {
+    return this.service.listGlobalCategories();
+  }
+
+  @UseGuards(AdminGuard)
+  @Post('global-item-category')
+  createGlobalCategory(@Req() req: AuthedRequest, @Body() dto: GlobalCategoryDto) {
+    return this.service.saveGlobalCategory(requireActor(req), undefined, dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @Patch('global-item-category/:id')
+  updateGlobalCategory(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: GlobalCategoryDto) {
+    return this.service.saveGlobalCategory(requireActor(req), Number(id), dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @Delete('global-item-category/:id')
+  deleteGlobalCategory(@Req() req: AuthedRequest, @Param('id') id: string, @Query('force') force?: string) {
+    return this.service.deleteGlobalCategory(requireActor(req), Number(id), force === 'true');
+  }
+
+  @UseGuards(AdminGuard)
+  @Get('admin')
+  listAdmins(@Req() req: AuthedRequest) {
+    return this.service.listAdmins(requireActor(req));
+  }
+
+  @UseGuards(AdminGuard)
+  @Post('admin')
+  createAdmin(@Req() req: AuthedRequest, @Body() dto: AdminAccountDto) {
+    return this.service.saveAdmin(requireActor(req), undefined, dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @Patch('admin/:id')
+  updateAdmin(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: AdminAccountDto) {
+    return this.service.saveAdmin(requireActor(req), Number(id), dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @Delete('admin/:id')
+  deleteAdmin(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.deleteAdmin(requireActor(req), Number(id));
   }
 
   @UseGuards(AdminGuard)
   @Get('user')
-  listUsers(@Query() query: PageQueryDto) {
-    return this.service.listUsers(query);
+  listUsers(@Req() req: AuthedRequest, @Query() query: PageQueryDto) {
+    return this.service.listUsers(requireActor(req), query);
   }
 
   @UseGuards(AdminGuard)
   @Patch('user/:id/status')
-  updateUserStatus(@Param('id') id: string, @Body() dto: UserStatusDto) {
-    return this.service.updateUserStatus(Number(id), dto);
+  updateUserStatus(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: UserStatusDto) {
+    return this.service.updateUserStatus(requireActor(req), Number(id), dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @Delete('user/:id')
+  deleteUser(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.deleteUser(requireActor(req), Number(id));
   }
 
   @UseGuards(AdminGuard)
@@ -151,8 +213,8 @@ export class AppController {
 
   @UseGuards(AdminGuard)
   @Delete('item-category/:id')
-  deleteCategory(@Req() req: AuthedRequest, @Param('id') id: string) {
-    return this.service.deleteCategory(Number(id), requireActor(req));
+  deleteCategory(@Req() req: AuthedRequest, @Param('id') id: string, @Query('force') force?: string) {
+    return this.service.deleteCategory(Number(id), requireActor(req), force === 'true');
   }
 
   @UseGuards(AdminGuard)
@@ -181,8 +243,8 @@ export class AppController {
 
   @UseGuards(AdminGuard)
   @Delete('item/:id')
-  deleteItem(@Req() req: AuthedRequest, @Param('id') id: string) {
-    return this.service.deleteItem(Number(id), requireActor(req));
+  deleteItem(@Req() req: AuthedRequest, @Param('id') id: string, @Query('force') force?: string) {
+    return this.service.deleteItem(Number(id), requireActor(req), force === 'true');
   }
 
   @UseGuards(AdminGuard)

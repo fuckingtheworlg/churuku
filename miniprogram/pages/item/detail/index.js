@@ -5,11 +5,15 @@ function formatDate(value) {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
-function presentRecord(record) {
+function presentRecord(record, itemId) {
+  const line = (record.items || []).find((item) => item.itemId === itemId) || {};
+  const detailItem = line.item || record.item || {};
   const photoUrls = (record.photos || []).map(asset);
   const signatureUrl = asset(record.signatureUrl);
   return {
     ...record,
+    displayQuantity: line.quantity || record.quantity,
+    displayUnit: detailItem.unit || '件',
     photoUrls,
     signatureUrl,
     previewUrls: signatureUrl ? [...photoUrls, signatureUrl] : photoUrls,
@@ -34,7 +38,7 @@ Page({
     ]);
     this.setData({
       item,
-      records: res.list.map(presentRecord),
+      records: res.list.map((record) => presentRecord(record, Number(this.data.id))),
     });
   },
   previewImage(event) {

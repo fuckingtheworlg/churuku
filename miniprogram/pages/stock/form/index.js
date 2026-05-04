@@ -12,8 +12,8 @@ Page({
     type: 'in',
     items: [],
     itemNames: [],
-    itemIndex: -1,
-    quantity: '',
+    projectName: '',
+    lines: [{ itemIndex: -1, quantity: '' }],
     location: {},
     photos: [],
     date: today(),
@@ -29,11 +29,28 @@ Page({
     const res = await request({ url: '/mini/item', data: { pageSize: 200 } });
     this.setData({ items: res.list, itemNames: res.list.map((item) => `${item.name}（${item.quantity}${item.unit}）`) });
   },
-  onItemChange(e) {
-    this.setData({ itemIndex: Number(e.detail.value) });
+  onProjectName(e) {
+    this.setData({ projectName: e.detail.value });
   },
-  onQuantity(e) {
-    this.setData({ quantity: e.detail.value });
+  onLineItemChange(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const lines = this.data.lines.slice();
+    lines[index].itemIndex = Number(e.detail.value);
+    this.setData({ lines });
+  },
+  onLineQuantity(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const lines = this.data.lines.slice();
+    lines[index].quantity = e.detail.value;
+    this.setData({ lines });
+  },
+  addLine() {
+    this.setData({ lines: [...this.data.lines, { itemIndex: -1, quantity: '' }] });
+  },
+  removeLine(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const lines = this.data.lines.filter((_, i) => i !== index);
+    this.setData({ lines: lines.length ? lines : [{ itemIndex: -1, quantity: '' }] });
   },
   onDate(e) {
     this.setData({ date: e.detail.value });
@@ -58,9 +75,16 @@ Page({
     this.setData({ photos: res.tempFiles.map((file) => file.tempFilePath) });
   },
   async submit() {
-    const item = this.data.items[this.data.itemIndex];
-    const quantity = Number(this.data.quantity);
-    if (!item || !quantity || !this.data.location.latitude) {
+    const projectName = this.data.projectName.trim();
+    const orderItems = this.data.lines.map((line) => ({
+      item: this.data.items[line.itemIndex],
+      quantity: Number(line.quantity),
+    }));
+    if (!projectName) {
+      wx.showToast({ title: '请填写项目名称', icon: 'none' });
+      return;
+    }
+    if (orderItems.some((line) => !line.item || !line.quantity) || !this.data.location.latitude) {
       wx.showToast({ title: '请选择物品、数量和位置', icon: 'none' });
       return;
     }
@@ -78,9 +102,9 @@ Page({
         url: '/stock-record',
         method: 'POST',
         data: {
-          itemId: item.id,
           type: this.data.type,
-          quantity,
+          projectName,
+          items: orderItems.map((line) => ({ itemId: line.item.id, quantity: line.quantity })),
           latitude: this.data.location.latitude,
           longitude: this.data.location.longitude,
           address: this.data.location.address,
