@@ -26,6 +26,22 @@ export enum AdminRole {
   Dept = 'dept',
 }
 
+@Entity('dept')
+export class DeptEntity {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  name: string;
+
+  @Index({ unique: true })
+  @Column()
+  code: string;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+}
+
 @Entity('admin')
 export class AdminEntity {
   @PrimaryGeneratedColumn()
@@ -50,22 +66,6 @@ export class AdminEntity {
   @ManyToOne(() => DeptEntity, { nullable: true, createForeignKeyConstraints: false })
   @JoinColumn({ name: 'dept_id' })
   dept?: DeptEntity;
-
-  @CreateDateColumn({ name: 'created_at' })
-  createdAt: Date;
-}
-
-@Entity('dept')
-export class DeptEntity {
-  @PrimaryGeneratedColumn()
-  id: number;
-
-  @Column()
-  name: string;
-
-  @Index({ unique: true })
-  @Column()
-  code: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
