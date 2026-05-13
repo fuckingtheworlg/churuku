@@ -4,20 +4,19 @@
       <h2>Churuku 管理后台</h2>
       <el-form label-position="top" @submit.prevent="login">
         <el-form-item label="账号">
-          <el-input v-model="loginForm.username" />
+          <el-input v-model="loginForm.username" autocomplete="off" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="loginForm.password" type="password" show-password />
+          <el-input v-model="loginForm.password" type="password" show-password autocomplete="off" />
         </el-form-item>
         <el-button type="primary" class="full" :loading="loading" @click="login">登录</el-button>
-        <p class="muted">默认账号：admin / admin123</p>
       </el-form>
     </el-card>
   </div>
   <el-container v-else class="shell">
     <el-aside width="220px" class="aside">
       <h2>Churuku</h2>
-      <el-menu :default-active="active" @select="active = $event">
+      <el-menu :default-active="active" @select="onMenuSelect">
         <el-menu-item index="dashboard">仪表盘</el-menu-item>
         <el-menu-item v-if="isSuperAdmin" index="dept">部门</el-menu-item>
         <el-menu-item v-if="isSuperAdmin" index="admin">部门后台账号</el-menu-item>
@@ -36,6 +35,14 @@
         <el-button link type="danger" @click="logout">退出</el-button>
       </el-header>
       <el-main>
+        <el-alert
+          v-if="mustChangePassword"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="为安全考虑，首次登录请先修改密码后再使用其他功能。"
+          style="margin-bottom:16px"
+        />
         <Dashboard v-if="active === 'dashboard'" />
         <DeptPage v-else-if="active === 'dept'" :is-super="isSuperAdmin" @changed="refreshOptions" />
         <AdminPage v-else-if="active === 'admin'" :depts="depts" />
@@ -44,7 +51,7 @@
         <CategoryPage v-else-if="active === 'category'" :depts="depts" :is-super="isSuperAdmin" />
         <ItemPage v-else-if="active === 'item'" :depts="depts" :is-super="isSuperAdmin" />
         <RecordPage v-else-if="active === 'record'" :depts="depts" />
-        <PasswordPage v-else />
+        <PasswordPage v-else :force="mustChangePassword" @changed="onPasswordChanged" />
       </el-main>
     </el-container>
   </el-container>
@@ -61,8 +68,9 @@ const loading = ref(false);
 const active = ref('dashboard');
 const depts = ref<Dept[]>([]);
 const currentAdmin = ref<AdminAccount | null>(null);
-const isSuperAdmin = computed(() => currentAdmin.value?.role !== 'dept');
-const loginForm = reactive({ username: 'admin', password: 'admin123' });
+const isSuperAdmin = computed(() => currentAdmin.value?.role === 'super');
+const mustChangePassword = computed(() => !!currentAdmin.value?.mustChangePassword);
+const loginForm = reactive({ username: '', password: '' });
 const titleMap: Record<string, string> = {
   dashboard: '仪表盘',
   dept: '部门管理',
@@ -76,15 +84,20 @@ const titleMap: Record<string, string> = {
 };
 
 async function login() {
+  if (!loginForm.username || !loginForm.password) {
+    return ElMessage.warning('请输入账号和密码');
+  }
   loading.value = true;
   try {
     const res: any = await api.adminLogin(loginForm);
     localStorage.setItem('admin_token', res.token);
     currentAdmin.value = res.user;
     token.value = res.token;
+    active.value = res.user?.mustChangePassword ? 'password' : 'dashboard';
+    loginForm.password = '';
     await refreshOptions();
   } catch (error: any) {
-    ElMessage.error(error.message);
+    ElMessage.error(error?.message || '登录失败，请检查账号或密码');
   } finally {
     loading.value = false;
   }
@@ -94,16 +107,45 @@ function logout() {
   localStorage.removeItem('admin_token');
   currentAdmin.value = null;
   token.value = '';
+  active.value = 'dashboard';
 }
 
 async function refreshOptions() {
   if (!token.value) return;
-  const me: any = await api.adminMe();
-  currentAdmin.value = me.user;
-  if (currentAdmin.value?.role === 'dept' && ['dept', 'admin', 'globalCategory'].includes(active.value)) {
+  try {
+    const me: any = await api.adminMe();
+    currentAdmin.value = me.user;
+  } catch (error: any) {
+    ElMessage.error(error?.message || '登录已失效，请重新登录');
+    logout();
+    return;
+  }
+  if (currentAdmin.value?.mustChangePassword) {
+    active.value = 'password';
+  } else if (currentAdmin.value?.role === 'dept' && ['dept', 'admin', 'globalCategory'].includes(active.value)) {
     active.value = 'dashboard';
   }
-  depts.value = await api.depts();
+  try {
+    depts.value = await api.depts();
+  } catch (error) {
+    depts.value = [];
+  }
+}
+
+function onMenuSelect(key: string) {
+  if (mustChangePassword.value && key !== 'password') {
+    ElMessage.warning('请先修改初始密码后再操作其他功能');
+    active.value = 'password';
+    return;
+  }
+  active.value = key;
+}
+
+function onPasswordChanged() {
+  if (currentAdmin.value) {
+    currentAdmin.value = { ...currentAdmin.value, mustChangePassword: false };
+  }
+  refreshOptions();
 }
 
 onMounted(refreshOptions);
@@ -483,7 +525,7 @@ const ItemPage = defineComponent({
       keyword: '',
     });
     const dialog = ref(false);
-    const form = reactive<any>({ id: 0, deptId: 0, categoryId: undefined, name: '', spec: '', unit: '件', location: '', note: '' });
+    const form = reactive<any>({ id: 0, deptId: 0, categoryId: undefined, name: '', spec: '', unit: '件', location: '', quantity: 0, note: '' });
     async function load() {
       const res: any = await api.items(query);
       items.value = res.list;
@@ -507,13 +549,22 @@ const ItemPage = defineComponent({
       await loadCategories(form.deptId);
     }
     function open(row?: Item) {
-      Object.assign(form, row || { id: 0, deptId: query.deptId || props.depts[0]?.id || 0, categoryId: undefined, name: '', spec: '', unit: '件', location: '', note: '' });
+      const defaults = { id: 0, deptId: query.deptId || props.depts[0]?.id || 0, categoryId: undefined, name: '', spec: '', unit: '件', location: '', quantity: 0, note: '' };
+      Object.assign(form, defaults, row || {});
+      if (row && (row.quantity === undefined || row.quantity === null)) {
+        form.quantity = 0;
+      }
       loadCategories(form.deptId);
       dialog.value = true;
     }
     async function save() {
       if (!form.deptId || !form.name) return ElMessage.warning('请选择部门/仓库并填写物品名称');
-      await api.saveItem(form, form.id || undefined);
+      const quantity = Number(form.quantity);
+      if (!Number.isFinite(quantity) || quantity < 0) {
+        return ElMessage.warning('当前库存不能为空，且需要大于等于 0');
+      }
+      const payload = { ...form, quantity };
+      await api.saveItem(payload, form.id || undefined);
       dialog.value = false;
       ElMessage.success('物品已保存');
       await load();
@@ -573,6 +624,7 @@ const ItemPage = defineComponent({
           <el-form-item label="规格"><el-select v-model="form.spec" filterable allow-create default-first-option clearable placeholder="选择或输入规格"><el-option v-for="s in specOptions" :key="s" :label="s" :value="s" /></el-select></el-form-item>
           <el-form-item label="单位"><el-select v-model="form.unit" filterable allow-create default-first-option clearable placeholder="选择或输入单位"><el-option v-for="u in unitOptions" :key="u" :label="u" :value="u" /></el-select></el-form-item>
           <el-form-item label="存放位置"><el-select v-model="form.location" filterable allow-create default-first-option clearable placeholder="选择或输入存放位置"><el-option v-for="l in locationOptions" :key="l" :label="l" :value="l" /></el-select></el-form-item>
+          <el-form-item label="当前库存"><el-input-number v-model="form.quantity" :min="0" :step="1" controls-position="right" /><span class="muted" style="margin-left:8px">新建时为初始库存；编辑时直接覆盖，会作为新的当前库存。</span></el-form-item>
           <el-form-item label="备注"><el-input v-model="form.note" type="textarea" /></el-form-item>
         </el-form>
         <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
@@ -661,20 +713,37 @@ const RecordPage = defineComponent({
 });
 
 const PasswordPage = defineComponent({
-  setup() {
-    const form = reactive({ oldPassword: '', newPassword: '' });
+  props: { force: { type: Boolean, default: false } },
+  emits: ['changed'],
+  setup(props, { emit }) {
+    const form = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' });
     async function save() {
-      await api.changePassword(form);
+      if (!form.oldPassword || !form.newPassword) {
+        return ElMessage.warning('请填写原密码和新密码');
+      }
+      if (form.newPassword.length < 6) {
+        return ElMessage.warning('新密码至少 6 位');
+      }
+      if (form.newPassword !== form.confirmPassword) {
+        return ElMessage.warning('两次输入的新密码不一致');
+      }
+      if (form.newPassword === form.oldPassword) {
+        return ElMessage.warning('新密码不能与原密码相同');
+      }
+      await api.changePassword({ oldPassword: form.oldPassword, newPassword: form.newPassword });
       ElMessage.success('密码已修改');
-      Object.assign(form, { oldPassword: '', newPassword: '' });
+      Object.assign(form, { oldPassword: '', newPassword: '', confirmPassword: '' });
+      emit('changed');
     }
-    return { form, save };
+    return { props, form, save };
   },
   template: `
     <div class="page-card password">
-      <el-form label-width="90px">
-        <el-form-item label="原密码"><el-input v-model="form.oldPassword" type="password" /></el-form-item>
-        <el-form-item label="新密码"><el-input v-model="form.newPassword" type="password" /></el-form-item>
+      <p v-if="props.force" class="muted">首次登录请修改初始密码，新密码至少 6 位，与原密码不同。</p>
+      <el-form label-width="100px">
+        <el-form-item label="原密码"><el-input v-model="form.oldPassword" type="password" show-password autocomplete="off" /></el-form-item>
+        <el-form-item label="新密码"><el-input v-model="form.newPassword" type="password" show-password autocomplete="off" /></el-form-item>
+        <el-form-item label="确认新密码"><el-input v-model="form.confirmPassword" type="password" show-password autocomplete="off" /></el-form-item>
         <el-button type="primary" @click="save">保存</el-button>
       </el-form>
     </div>`,

@@ -146,6 +146,14 @@ export class ItemDto {
   location?: string;
 
   @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Transform(({ value }) =>
+    value === undefined || value === null || value === '' ? undefined : Number(value),
+  )
+  quantity?: number;
+
+  @IsOptional()
   @IsString()
   note?: string;
 

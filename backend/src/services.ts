@@ -421,6 +421,13 @@ export class AppService {
       note: dto.note,
       image: dto.image,
     });
+    if (dto.quantity !== undefined && dto.quantity !== null) {
+      const value = Number(dto.quantity);
+      if (!Number.isFinite(value) || value < 0) {
+        throw new BadRequestException('数量不能小于 0');
+      }
+      item.quantity = value;
+    }
     return this.itemRepo.save(item);
   }
 
