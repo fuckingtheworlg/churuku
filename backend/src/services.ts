@@ -500,7 +500,7 @@ export class AppService {
     this.assertDeptAccess(actor, deptId);
     const insufficient = items.find((line) => dto.type === StockType.Out && line.item.quantity < line.quantity);
     if (insufficient) throw new BadRequestException(`${insufficient.item.name} 库存不足`);
-    return this.itemRepo.manager.transaction(async (manager) => {
+    const orderId = await this.itemRepo.manager.transaction(async (manager) => {
       for (const line of items) {
         line.item.quantity += dto.type === StockType.In ? line.quantity : -line.quantity;
         await manager.save(ItemEntity, line.item);
@@ -534,8 +534,9 @@ export class AppService {
           }),
         ),
       );
-      return this.getStockOrder(order.id, actor);
+      return order.id;
     });
+    return this.getStockOrder(orderId, actor);
   }
 
   async listStockRecords(actor: JwtActor, query: PageQueryDto) {
