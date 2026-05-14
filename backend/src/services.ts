@@ -579,6 +579,52 @@ export class AppService {
     return this.buildExcel(rows);
   }
 
+  async exportSingleRecord(actor: JwtActor, id: number, format = 'xlsx') {
+    const order = await this.getStockOrder(id, actor);
+    const rows = [order];
+    if (format === 'pdf') return this.buildPdf(rows);
+    if (format === 'docx') return this.buildDocx(rows);
+    return this.buildExcel(rows);
+  }
+
+  async exportRecordsByIds(actor: JwtActor, ids: number[], format = 'xlsx') {
+    if (!ids.length) throw new BadRequestException('请选择要导出的记录');
+    const rows: any[] = [];
+    for (const id of ids) {
+      rows.push(await this.getStockOrder(id, actor));
+    }
+    if (format === 'pdf') return this.buildPdf(rows);
+    if (format === 'docx') return this.buildDocx(rows);
+    return this.buildExcel(rows);
+  }
+
+  async deleteStockOrder(actor: JwtActor, id: number) {
+    const order = await this.orderRepo.findOneBy({ id });
+    if (!order) throw new NotFoundException('出入库记录不存在');
+    this.assertDeptAccess(actor, order.deptId);
+    await this.orderRepo.manager.transaction(async (manager) => {
+      await manager.delete(StockOrderItemEntity, { orderId: id });
+      await manager.delete(StockOrderEntity, { id });
+    });
+    return true;
+  }
+
+  async bulkDeleteStockOrders(actor: JwtActor, ids: number[]) {
+    if (!Array.isArray(ids) || !ids.length) {
+      throw new BadRequestException('请选择要删除的记录');
+    }
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await this.deleteStockOrder(actor, Number(id));
+        deleted += 1;
+      } catch (error) {
+        if (error instanceof UnauthorizedException) throw error;
+      }
+    }
+    return { deleted };
+  }
+
   private applyRecordFilters(qb: any, deptId: number | undefined, query: PageQueryDto) {
     if (deptId) qb.andWhere('record.deptId = :deptId', { deptId });
     if (query.type) qb.andWhere('record.type = :type', { type: query.type });

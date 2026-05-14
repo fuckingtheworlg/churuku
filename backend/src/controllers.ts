@@ -284,6 +284,51 @@ export class AppController {
   }
 
   @UseGuards(AdminGuard)
+  @Get('export/stock-record/:id')
+  async exportStockRecordOne(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Query('format') format: string | undefined,
+    @Res() res: Response,
+  ) {
+    const file = await this.service.exportSingleRecord(requireActor(req), Number(id), format);
+    const filename = `stock-record-${id}-${Date.now()}.${file.ext}`;
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(file.buffer);
+  }
+
+  @UseGuards(AdminGuard)
+  @Delete('stock-record/:id')
+  deleteStockRecord(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.deleteStockOrder(requireActor(req), Number(id));
+  }
+
+  @UseGuards(AdminGuard)
+  @Post('stock-record/batch-delete')
+  bulkDeleteStockRecord(@Req() req: AuthedRequest, @Body() body: { ids: number[] }) {
+    return this.service.bulkDeleteStockOrders(requireActor(req), (body?.ids || []).map(Number));
+  }
+
+  @UseGuards(AdminGuard)
+  @Post('export/stock-record/batch')
+  async exportStockRecordBatch(
+    @Req() req: AuthedRequest,
+    @Body() body: { ids: number[]; format?: string },
+    @Res() res: Response,
+  ) {
+    const file = await this.service.exportRecordsByIds(
+      requireActor(req),
+      (body?.ids || []).map(Number),
+      body?.format,
+    );
+    const filename = `stock-record-batch-${Date.now()}.${file.ext}`;
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(file.buffer);
+  }
+
+  @UseGuards(AdminGuard)
   @Get('export/stock-record')
   async exportStockRecord(
     @Req() req: AuthedRequest,

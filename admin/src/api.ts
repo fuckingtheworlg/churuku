@@ -120,6 +120,8 @@ export const api = {
     id ? request.patch(`/item/${id}`, data) : request.post('/item', data),
   deleteItem: (id: number, force = false) => request.delete(`/item/${id}`, { params: { force } }),
   records: (params: Record<string, unknown>) => request.get('/stock-record', { params }),
+  deleteRecord: (id: number) => request.delete(`/stock-record/${id}`),
+  bulkDeleteRecords: (ids: number[]) => request.post('/stock-record/batch-delete', { ids }),
   upload: (file: File) => {
     const body = new FormData();
     body.append('file', file);

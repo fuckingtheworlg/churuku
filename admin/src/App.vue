@@ -638,16 +638,24 @@ const RecordPage = defineComponent({
     const records = ref<StockRecord[]>([]);
     const query = reactive<any>({ page: 1, pageSize: 50, deptId: undefined, keyword: '', type: undefined, startDate: '', endDate: '' });
     const detail = ref<StockRecord | null>(null);
+    const selected = ref<StockRecord[]>([]);
+    const tableRef = ref<any>(null);
     async function load() {
       const res: any = await api.records(query);
       records.value = res.list;
+      selected.value = [];
+      tableRef.value?.clearSelection?.();
     }
-    async function downloadExport(format: string) {
-      const params = new URLSearchParams();
-      Object.keys(query).forEach((key) => query[key] && params.set(key, query[key]));
-      params.set('format', format);
-      const res = await fetch(`/api/export/stock-record?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('admin_token') || ''}` },
+    function onSelectionChange(rows: StockRecord[]) {
+      selected.value = rows;
+    }
+    async function downloadBlob(url: string, filename: string, init?: RequestInit) {
+      const res = await fetch(url, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('admin_token') || ''}`,
+          ...(init && init.headers ? init.headers : {}),
+        },
       });
       if (!res.ok) {
         ElMessage.error('导出失败，请重新登录后再试');
@@ -656,16 +664,72 @@ const RecordPage = defineComponent({
       const blob = await res.blob();
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `stock-record-${Date.now()}.${format}`;
+      link.download = filename;
       link.click();
       URL.revokeObjectURL(link.href);
+    }
+    async function downloadExport(format: string) {
+      const params = new URLSearchParams();
+      Object.keys(query).forEach((key) => query[key] && params.set(key, query[key]));
+      params.set('format', format);
+      await downloadBlob(`/api/export/stock-record?${params.toString()}`, `stock-record-${Date.now()}.${format}`);
+    }
+    async function downloadSingle(row: StockRecord, format: string) {
+      await downloadBlob(`/api/export/stock-record/${row.id}?format=${format}`, `stock-record-${row.id}.${format}`);
+    }
+    async function downloadBatch(format: string) {
+      if (!selected.value.length) return ElMessage.warning('请先勾选要导出的记录');
+      const ids = selected.value.map((row) => row.id);
+      await downloadBlob('/api/export/stock-record/batch', `stock-record-batch-${Date.now()}.${format}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, format }),
+      });
+    }
+    async function removeSingle(row: StockRecord) {
+      await ElMessageBox.confirm(
+        `删除 ${dayjs(row.occurredAt).format('YYYY-MM-DD HH:mm')} 的「${row.projectName || '出入库'}」记录？仅删除流水，不会改动库存数量，不可恢复。`,
+        '删除确认',
+        { type: 'warning' },
+      );
+      await api.deleteRecord(row.id);
+      ElMessage.success('已删除');
+      await load();
+    }
+    async function removeBatch() {
+      if (!selected.value.length) return ElMessage.warning('请先勾选要删除的记录');
+      const ids = selected.value.map((row) => row.id);
+      await ElMessageBox.confirm(
+        `共选择 ${ids.length} 条记录，确认全部删除？仅删除流水，不会改动库存数量，不可恢复。`,
+        '批量删除',
+        { type: 'warning' },
+      );
+      const res: any = await api.bulkDeleteRecords(ids);
+      ElMessage.success(`已删除 ${res?.deleted ?? ids.length} 条`);
+      await load();
     }
     function openMap(row: StockRecord) {
       if (!row.latitude || !row.longitude) return ElMessage.warning('没有定位信息');
       window.open(`https://apis.map.qq.com/uri/v1/marker?marker=coord:${row.latitude},${row.longitude};title:${encodeURIComponent(row.poiName || row.address || '出入库位置')}`, '_blank');
     }
     onMounted(load);
-    return { props, records, query, detail, load, downloadExport, openMap, dayjs };
+    return {
+      props,
+      records,
+      query,
+      detail,
+      selected,
+      tableRef,
+      load,
+      onSelectionChange,
+      downloadExport,
+      downloadSingle,
+      downloadBatch,
+      removeSingle,
+      removeBatch,
+      openMap,
+      dayjs,
+    };
   },
   template: `
     <div class="page-card">
@@ -676,11 +740,19 @@ const RecordPage = defineComponent({
         <el-date-picker v-model="query.startDate" clearable type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
         <el-date-picker v-model="query.endDate" clearable type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
         <el-button @click="load">查询</el-button>
-        <el-button @click="downloadExport('xlsx')">导出 Excel</el-button>
-        <el-button @click="downloadExport('docx')">导出 Word</el-button>
-        <el-button @click="downloadExport('pdf')">导出 PDF</el-button>
+        <el-button @click="downloadExport('xlsx')">按筛选导出 Excel</el-button>
+        <el-button @click="downloadExport('docx')">按筛选导出 Word</el-button>
+        <el-button @click="downloadExport('pdf')">按筛选导出 PDF</el-button>
       </div>
-      <el-table :data="records">
+      <div class="toolbar">
+        <span class="muted">已选 {{ selected.length }} 条</span>
+        <el-button :disabled="!selected.length" @click="downloadBatch('xlsx')">批量导出 Excel</el-button>
+        <el-button :disabled="!selected.length" @click="downloadBatch('docx')">批量导出 Word</el-button>
+        <el-button :disabled="!selected.length" @click="downloadBatch('pdf')">批量导出 PDF</el-button>
+        <el-button :disabled="!selected.length" type="danger" @click="removeBatch">批量删除</el-button>
+      </div>
+      <el-table ref="tableRef" :data="records" @selection-change="onSelectionChange">
+        <el-table-column type="selection" width="46" />
         <el-table-column label="日期" width="150"><template #default="{row}">{{ dayjs(row.occurredAt).format('YYYY-MM-DD HH:mm') }}</template></el-table-column>
         <el-table-column label="部门"><template #default="{row}">{{ row.dept?.name }}</template></el-table-column>
         <el-table-column prop="projectName" label="项目名称" />
@@ -689,9 +761,20 @@ const RecordPage = defineComponent({
         <el-table-column prop="quantity" label="合计数量" />
         <el-table-column prop="operatorName" label="操作人" />
         <el-table-column label="位置"><template #default="{row}">{{ row.poiName || row.address }}</template></el-table-column>
-        <el-table-column label="操作" width="220"><template #default="{row}">
+        <el-table-column label="操作" width="360"><template #default="{row}">
           <el-button link type="primary" @click="detail=row">查看详情</el-button>
           <el-button link type="success" @click="openMap(row)">查看位置</el-button>
+          <el-dropdown trigger="click" @command="(format) => downloadSingle(row, format)" style="margin-left:8px">
+            <el-button link type="primary">导出本单 ▾</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="xlsx">Excel</el-dropdown-item>
+                <el-dropdown-item command="docx">Word</el-dropdown-item>
+                <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button link type="danger" @click="removeSingle(row)">删除本单</el-button>
         </template></el-table-column>
       </el-table>
       <el-dialog :model-value="!!detail" title="出入库详情" @close="detail=null">
@@ -707,6 +790,12 @@ const RecordPage = defineComponent({
             <el-image v-for="p in detail.photos || []" :key="p" :src="p" style="width:120px;height:120px" fit="cover" :preview-src-list="detail.photos" />
             <el-image v-if="detail.signatureUrl" :src="detail.signatureUrl" style="width:220px;height:120px;background:#f8fafc" fit="contain" />
           </div>
+        </template>
+        <template #footer v-if="detail">
+          <el-button @click="downloadSingle(detail, 'xlsx')">导出 Excel</el-button>
+          <el-button @click="downloadSingle(detail, 'docx')">导出 Word</el-button>
+          <el-button @click="downloadSingle(detail, 'pdf')">导出 PDF</el-button>
+          <el-button type="primary" @click="detail=null">关闭</el-button>
         </template>
       </el-dialog>
     </div>`,
