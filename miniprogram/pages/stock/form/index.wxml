@@ -5,11 +5,11 @@
       <view class="type">{{type === 'in' ? '入库' : '出库'}}</view>
     </view>
     <view class="field">
-      <view class="label">项目名称</view>
+      <view class="label"><text class="required">*</text> 项目名称</view>
       <input value="{{projectName}}" placeholder="请输入项目名称" bindinput="onProjectName" />
     </view>
     <view class="field">
-      <view class="label">设备明细</view>
+      <view class="label"><text class="required">*</text> 设备明细</view>
       <view wx:for="{{lines}}" wx:for-item="line" wx:for-index="lineIndex" wx:key="*this" class="line-card">
         <picker range="{{itemNames}}" value="{{line.itemIndex}}" data-index="{{lineIndex}}" bindchange="onLineItemChange">
           <view>{{ itemNames[line.itemIndex] || '请选择物品' }}</view>
@@ -20,7 +20,7 @@
       <button size="mini" bindtap="addLine">添加设备</button>
     </view>
     <view class="field">
-      <view class="label">位置</view>
+      <view class="label"><text class="required">*</text> 位置</view>
       <button bindtap="chooseLocation">选择当前位置/地图位置</button>
       <view wx:if="{{location.address}}" class="location">
         <view>{{location.name}}</view>
@@ -29,24 +29,24 @@
       </view>
     </view>
     <view class="field">
-      <view class="label">拍照</view>
+      <view class="label"><text class="required">*</text> 拍照</view>
       <button bindtap="choosePhotos">拍照/选择图片</button>
       <view class="photos">
         <image wx:for="{{photos}}" wx:key="*this" src="{{item}}" mode="aspectFill" />
       </view>
     </view>
     <view class="field">
-      <view class="label">签字</view>
+      <view class="label"><text class="required">*</text> 签字</view>
       <signature-pad id="signature" />
     </view>
     <view class="field">
-      <view class="label">日期</view>
+      <view class="label"><text class="required">*</text> 日期</view>
       <picker mode="date" value="{{date}}" bindchange="onDate">
         <view>{{date}}</view>
       </picker>
     </view>
     <view class="field">
-      <view class="label">备注</view>
+      <view class="label">备注（可选）</view>
       <textarea value="{{note}}" placeholder="可选" bindinput="onNote" />
     </view>
     <button class="btn-primary" loading="{{loading}}" bindtap="submit">提交</button>
