@@ -860,31 +860,84 @@ export class AppService {
   }
 
   private async buildPdf(rows: any[]) {
-    const doc = new PDFDocument({ margin: 40, size: 'A4' });
-    const chunks: Buffer[] = [];
-    doc.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
-    doc.font(this.resolvePdfFontPath());
-    doc.fontSize(18).text('Churuku 出入库记录');
-    doc.moveDown();
-    doc.fontSize(10).text('日期 | 部门 | 项目 | 物品明细 | 类型 | 数量 | 操作人 | 位置');
-    doc.moveDown(0.5);
-    rows.forEach((row) => {
-      const data = this.exportRow(row);
-      doc
-        .fontSize(10)
-        .text(
-          `${data.date} | ${data.dept} | ${data.projectName} | ${data.item} | ${data.type} | ${data.quantity} | ${data.operator} | ${data.address || ''}`,
-          { lineGap: 4 },
-        );
-    });
-    doc.end();
-    return { buffer: await done, contentType: 'application/pdf', ext: 'pdf' };
+    try {
+      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      const errorPromise = new Promise<never>((_, reject) => doc.on('error', reject));
+      const donePromise = new Promise<Buffer>((resolve) =>
+        doc.on('end', () => resolve(Buffer.concat(chunks))),
+      );
+      this.applyPdfFont(doc);
+      doc.fontSize(18).text('Churuku 出入库记录');
+      doc.moveDown();
+      doc.fontSize(10).text('日期 | 部门 | 项目 | 物品明细 | 类型 | 数量 | 操作人 | 位置');
+      doc.moveDown(0.5);
+      rows.forEach((row) => {
+        const data = this.exportRow(row);
+        doc
+          .fontSize(10)
+          .text(
+            `${data.date} | ${data.dept} | ${data.projectName} | ${data.item} | ${data.type} | ${data.quantity} | ${data.operator} | ${data.address || ''}`,
+            { lineGap: 4 },
+          );
+      });
+      doc.end();
+      const buffer = await Promise.race([donePromise, errorPromise]);
+      return { buffer, contentType: 'application/pdf', ext: 'pdf' };
+    } catch (error: any) {
+      throw new BadRequestException(
+        `PDF 生成失败：${error?.message || error || '未知错误'}`,
+      );
+    }
+  }
+
+  private applyPdfFont(doc: PDFKit.PDFDocument) {
+    const fontPath = this.resolvePdfFontPath();
+    if (!fontPath.toLowerCase().endsWith('.ttc')) {
+      doc.font(fontPath);
+      return;
+    }
+    const psNames = [
+      'NotoSansCJKsc-Regular',
+      'NotoSansCJKtc-Regular',
+      'NotoSansCJKhk-Regular',
+      'NotoSansCJKjp-Regular',
+      'NotoSansCJKkr-Regular',
+      'NotoSerifCJKsc-Regular',
+      'STHeitiTC-Light',
+      'STHeitiSC-Light',
+      'STHeitiTC-Medium',
+      'STHeitiSC-Medium',
+    ];
+    let lastError: any;
+    for (const name of psNames) {
+      try {
+        doc.registerFont('cjk', fontPath, name);
+        doc.font('cjk');
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw new BadRequestException(
+      `PDF 字体加载失败，尝试 ${psNames.length} 个 PostScript 名均失败：${lastError?.message || lastError || '未知错误'}`,
+    );
   }
 
   private resolvePdfFontPath() {
+    const configured = this.config.get<string>('PDF_FONT_PATH') || '';
     const candidates = [
-      this.config.get<string>('PDF_FONT_PATH') || '',
+      configured,
+      '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+      '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+      '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+      '/usr/share/fonts/wenquanyi/wqy-microhei.ttc',
+      '/usr/share/fonts/wenquanyi/wqy-zenhei.ttc',
+      '/usr/share/fonts/truetype/arphic/uming.ttc',
+      '/usr/share/fonts/truetype/arphic/ukai.ttc',
       '/Library/Fonts/Arial Unicode.ttf',
       '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
       '/System/Library/Fonts/STHeiti Medium.ttc',
@@ -894,7 +947,7 @@ export class AppService {
     const fontPath = candidates.find((item) => existsSync(item));
     if (!fontPath) {
       throw new BadRequestException(
-        '未找到可用于 PDF 导出的中文字体，请在 .env 配置 PDF_FONT_PATH',
+        '未找到可用于 PDF 导出的中文字体，请在 .env 配置 PDF_FONT_PATH，或安装 fonts-noto-cjk',
       );
     }
     return fontPath;
