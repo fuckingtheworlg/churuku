@@ -1,5 +1,51 @@
-.toolbar input {
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.toolbar input,
+.toolbar .search-input {
+  flex: 1;
   background: #fff;
+}
+
+.scan-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 96rpx;
+  height: 80rpx;
+  border-radius: 16rpx;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1rpx solid #10b981;
+  flex: none;
+}
+
+.scan-icon-dot {
+  width: 28rpx;
+  height: 28rpx;
+  margin-bottom: 4rpx;
+  border: 2rpx solid #047857;
+  border-radius: 6rpx;
+  position: relative;
+}
+
+.scan-icon-dot::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -4rpx;
+  right: -4rpx;
+  height: 2rpx;
+  background: #047857;
+}
+
+.scan-icon-text {
+  font-size: 20rpx;
+  line-height: 1;
 }
 
 .tabs {
@@ -51,9 +97,4 @@
 
 .actions button {
   flex: 1;
-}
-
-.scan-btn {
-  background: #10b981;
-  color: #fff;
 }

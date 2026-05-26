@@ -76,14 +76,31 @@ Page({
   },
   async load() {
     const itemId = Number(this.data.id);
-    const [item, res, usage] = await Promise.all([
-      request({ url: `/mini/item/${this.data.id}` }),
-      request({ url: '/mini/stock-record', data: { itemId, pageSize: 100 } }),
+    let item;
+    try {
+      item = await request({ url: `/mini/item/${this.data.id}` });
+    } catch (error) {
+      wx.showModal({
+        title: '无法访问该设备',
+        content: error.message || '加载失败',
+        showCancel: false,
+        success: () => {
+          if (getCurrentPages().length > 1) {
+            wx.navigateBack();
+          } else {
+            wx.switchTab({ url: '/pages/index/index' });
+          }
+        },
+      });
+      return;
+    }
+    const [res, usage] = await Promise.all([
+      request({ url: '/mini/stock-record', data: { itemId, pageSize: 100 } }).catch(() => ({ list: [] })),
       request({ url: `/mini/item/${this.data.id}/usage` }).catch(() => null),
     ]);
     this.setData({
       item,
-      records: res.list.map((record) => presentRecord(record, itemId)),
+      records: (res.list || []).map((record) => presentRecord(record, itemId)),
       usage: presentUsage(usage),
     });
   },

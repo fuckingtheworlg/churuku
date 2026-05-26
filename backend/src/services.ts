@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -833,16 +834,16 @@ export class AppService {
 
   private assertDeptAccess(actor: JwtActor, deptId: number) {
     if (actor.role === 'mini' && Number(actor.deptId) !== deptId) {
-      throw new UnauthorizedException('无权操作该部门数据');
+      throw new ForbiddenException('该设备属于其他部门，无权操作');
     }
     if (actor.role === 'admin' && actor.adminRole === AdminRole.Dept && Number(actor.deptId) !== deptId) {
-      throw new UnauthorizedException('无权操作其他部门数据');
+      throw new ForbiddenException('无权操作其他部门数据');
     }
   }
 
   private requireSuperAdmin(actor: JwtActor) {
     if (actor.role !== 'admin' || actor.adminRole === AdminRole.Dept) {
-      throw new UnauthorizedException('需要超级管理员权限');
+      throw new ForbiddenException('需要超级管理员权限');
     }
   }
 

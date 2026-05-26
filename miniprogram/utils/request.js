@@ -17,7 +17,11 @@ function request({ url, method = 'GET', data = {}, header = {}, timeout = 30000 
         const body = res.data || {};
         if (res.statusCode === 401) {
           wx.removeStorageSync('token');
-          wx.reLaunch({ url: '/pages/login/index' });
+          const pages = (typeof getCurrentPages === 'function' && getCurrentPages()) || [];
+          const top = pages[pages.length - 1];
+          if (!top || top.route !== 'pages/login/index') {
+            wx.reLaunch({ url: '/pages/login/index' });
+          }
           reject(new Error(body.msg || '请重新登录'));
           return;
         }
