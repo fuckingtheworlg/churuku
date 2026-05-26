@@ -28,6 +28,7 @@ import {
   LoginDto,
   PageQueryDto,
   StockRecordDto,
+  UsageActionDto,
   UserStatusDto,
   WxLoginDto,
   WxRegisterDto,
@@ -263,6 +264,45 @@ export class AppController {
   @Get('mini/item/:id')
   miniGetItem(@Req() req: AuthedRequest, @Param('id') id: string) {
     return this.service.getItem(Number(id), requireActor(req));
+  }
+
+  @UseGuards(MiniGuard)
+  @Get('mini/item/:id/usage')
+  miniGetItemUsage(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.getItemUsageSummary(requireActor(req), Number(id));
+  }
+
+  @UseGuards(AdminGuard)
+  @Get('item/:id/usage')
+  adminGetItemUsage(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.getItemUsageSummary(requireActor(req), Number(id));
+  }
+
+  @UseGuards(MiniGuard)
+  @Post('mini/usage/start')
+  miniStartUsage(@Req() req: AuthedRequest, @Body() dto: UsageActionDto) {
+    return this.service.startUsage(requireActor(req), dto);
+  }
+
+  @UseGuards(MiniGuard)
+  @Post('mini/usage/end')
+  miniEndUsage(@Req() req: AuthedRequest, @Body() dto: UsageActionDto) {
+    return this.service.endUsage(requireActor(req), dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @Get('item/:id/qrcode')
+  async exportItemQrCode(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Query('format') format: string | undefined,
+    @Res() res: Response,
+  ) {
+    const file = await this.service.buildItemQrCode(requireActor(req), Number(id), format);
+    const filename = `item-${id}-qrcode.${file.ext}`;
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.send(file.buffer);
   }
 
   @UseGuards(MiniGuard)

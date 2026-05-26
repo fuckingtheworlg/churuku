@@ -14,7 +14,8 @@ import { Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun } from
 import { Workbook } from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { existsSync } from 'fs';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, IsNull, Repository } from 'typeorm';
+import * as QRCode from 'qrcode';
 import {
   AdminAccountDto,
   CategoryDto,
@@ -25,6 +26,7 @@ import {
   LoginDto,
   PageQueryDto,
   StockRecordDto,
+  UsageActionDto,
   UserStatusDto,
   WxLoginDto,
   WxRegisterDto,
@@ -33,6 +35,7 @@ import {
   AdminEntity,
   AdminRole,
   DeptEntity,
+  EquipmentUsageEntity,
   GlobalItemCategoryEntity,
   ItemCategoryEntity,
   ItemEntity,
@@ -68,6 +71,8 @@ export class AppService {
     private readonly orderRepo: Repository<StockOrderEntity>,
     @InjectRepository(StockOrderItemEntity)
     private readonly orderItemRepo: Repository<StockOrderItemEntity>,
+    @InjectRepository(EquipmentUsageEntity)
+    private readonly usageRepo: Repository<EquipmentUsageEntity>,
   ) {}
 
   async seedAdmin() {
@@ -477,9 +482,129 @@ export class AppService {
     }
     if (force && this.isSuperAdmin(actor)) {
       await this.forceDeleteItemHistory(item.id);
+      await this.usageRepo.delete({ itemId: item.id });
     }
     await this.itemRepo.delete(id);
     return true;
+  }
+
+  async startUsage(actor: JwtActor, dto: UsageActionDto) {
+    const item = await this.getItem(dto.itemId, actor);
+    const open = await this.usageRepo.findOne({
+      where: { itemId: item.id, endedAt: IsNull() },
+      order: { startedAt: 'DESC' },
+      relations: ['operatorUser'],
+    });
+    if (open) {
+      const name = open.operatorName || open.operatorUser?.realName || '其他人员';
+      throw new BadRequestException(`该设备正在被 ${name} 使用，请先结束当前使用`);
+    }
+    const usage = this.usageRepo.create({
+      deptId: item.deptId,
+      itemId: item.id,
+      operatorUserId: actor.role === 'mini' ? actor.id : undefined,
+      operatorName: actor.realName || actor.username || '管理员',
+      startedAt: new Date(),
+      note: dto.note,
+    });
+    await this.usageRepo.save(usage);
+    return this.getItemUsageSummary(actor, item.id);
+  }
+
+  async endUsage(actor: JwtActor, dto: UsageActionDto) {
+    const item = await this.getItem(dto.itemId, actor);
+    const open = await this.usageRepo.findOne({
+      where: { itemId: item.id, endedAt: IsNull() },
+      order: { startedAt: 'DESC' },
+    });
+    if (!open) {
+      throw new BadRequestException('该设备当前不在使用中');
+    }
+    const endedAt = new Date();
+    const startedAt = new Date(open.startedAt);
+    const durationMinutes = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000));
+    open.endedAt = endedAt;
+    open.durationMinutes = durationMinutes;
+    if (dto.note) {
+      open.note = open.note ? `${open.note}；${dto.note}` : dto.note;
+    }
+    await this.usageRepo.save(open);
+    return this.getItemUsageSummary(actor, item.id);
+  }
+
+  async getItemUsageSummary(actor: JwtActor, itemId: number) {
+    const item = await this.getItem(itemId, actor);
+    const [ongoing, totalRow, recent] = await Promise.all([
+      this.usageRepo.findOne({
+        where: { itemId: item.id, endedAt: IsNull() },
+        order: { startedAt: 'DESC' },
+        relations: ['operatorUser'],
+      }),
+      this.usageRepo
+        .createQueryBuilder('u')
+        .select('COALESCE(SUM(u.duration_minutes), 0)', 'total')
+        .where('u.item_id = :id', { id: item.id })
+        .andWhere('u.ended_at IS NOT NULL')
+        .getRawOne<{ total: string | number }>(),
+      this.usageRepo.find({
+        where: { itemId: item.id },
+        order: { startedAt: 'DESC' },
+        take: 10,
+        relations: ['operatorUser'],
+      }),
+    ]);
+    const totalEnded = Number(totalRow?.total || 0);
+    const ongoingMinutes = ongoing
+      ? Math.max(0, Math.round((Date.now() - new Date(ongoing.startedAt).getTime()) / 60000))
+      : 0;
+    return {
+      item,
+      ongoing: ongoing
+        ? {
+            id: ongoing.id,
+            operatorUserId: ongoing.operatorUserId,
+            operatorName:
+              ongoing.operatorName || ongoing.operatorUser?.realName || '未知',
+            startedAt: ongoing.startedAt,
+            durationMinutes: ongoingMinutes,
+          }
+        : null,
+      totalMinutes: totalEnded + ongoingMinutes,
+      recent: recent.map((row) => ({
+        id: row.id,
+        operatorName: row.operatorName || row.operatorUser?.realName || '未知',
+        startedAt: row.startedAt,
+        endedAt: row.endedAt,
+        durationMinutes: row.durationMinutes,
+        note: row.note,
+      })),
+    };
+  }
+
+  async buildItemQrCode(actor: JwtActor, itemId: number, format = 'png') {
+    const item = await this.getItem(itemId, actor);
+    const payload = String(item.id);
+    if (format === 'pdf') {
+      const png = await QRCode.toBuffer(payload, { width: 480, margin: 2, errorCorrectionLevel: 'M' });
+      const doc = new PDFDocument({ size: 'A6', margin: 24 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      const done = new Promise<Buffer>((resolve) =>
+        doc.on('end', () => resolve(Buffer.concat(chunks))),
+      );
+      this.applyPdfFont(doc);
+      doc.fontSize(14).text(item.name, { align: 'center' });
+      doc.moveDown(0.3);
+      doc.fontSize(10).text(`${item.spec || ''}`.trim(), { align: 'center' });
+      doc.moveDown(0.6);
+      doc.image(png, { fit: [240, 240], align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(9).text(`编号：${item.id}`, { align: 'center' });
+      doc.end();
+      return { buffer: await done, contentType: 'application/pdf', ext: 'pdf' };
+    }
+    const png = await QRCode.toBuffer(payload, { width: 600, margin: 2, errorCorrectionLevel: 'M' });
+    return { buffer: png, contentType: 'image/png', ext: 'png' };
   }
 
   async createStockRecord(actor: JwtActor, dto: StockRecordDto) {

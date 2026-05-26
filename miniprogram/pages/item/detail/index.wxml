@@ -5,7 +5,33 @@
     <view class="qty">当前库存：{{item.quantity}} {{item.unit}}</view>
     <view class="muted">存放位置：{{item.location || '未填写'}}</view>
   </view>
-  <view class="section-title">历史记录</view>
+  <view class="card usage-card">
+    <view class="row">
+      <view class="section-title" style="margin:0">设备使用</view>
+      <view wx:if="{{usage.ongoing}}" class="status-active">使用中</view>
+      <view wx:else class="status-idle">空闲</view>
+    </view>
+    <view wx:if="{{usage.ongoing}}">
+      <view class="muted">使用人：{{usage.ongoing.operatorName}}</view>
+      <view class="muted">开始时间：{{usage.ongoing.startedAtText}}</view>
+      <view class="muted">本次已用：{{usage.ongoing.durationText}}</view>
+    </view>
+    <view class="muted">累计使用：{{usage.totalText}}</view>
+    <view class="usage-actions">
+      <button wx:if="{{!usage.ongoing}}" class="btn-primary" loading="{{usageLoading}}" bindtap="startUsage">开始使用</button>
+      <button wx:else loading="{{usageLoading}}" bindtap="endUsage">结束使用</button>
+    </view>
+  </view>
+  <view wx:if="{{usage.recent.length}}" class="section-title">最近使用记录</view>
+  <view wx:for="{{usage.recent}}" wx:for-item="row" wx:key="id" class="card usage-row">
+    <view class="row">
+      <view>{{row.operatorName}}</view>
+      <view class="muted">{{row.durationText || '使用中'}}</view>
+    </view>
+    <view class="muted">开始：{{row.startedAtText}}</view>
+    <view class="muted">结束：{{row.endedAtText}}</view>
+  </view>
+  <view class="section-title">出入库历史记录</view>
   <view wx:for="{{records}}" wx:for-item="record" wx:for-index="recordIndex" wx:key="id" class="card">
     <view class="row">
       <view>{{record.type === 'in' ? '入库' : '出库'}} {{record.displayQuantity}} {{record.displayUnit}}</view>

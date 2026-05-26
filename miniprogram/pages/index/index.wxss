@@ -52,3 +52,8 @@
 .actions button {
   flex: 1;
 }
+
+.scan-btn {
+  background: #10b981;
+  color: #fff;
+}

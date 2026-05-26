@@ -37,4 +37,19 @@ Page({
   goStock(e) {
     wx.navigateTo({ url: `/pages/stock/form/index?type=${e.currentTarget.dataset.type}` });
   },
+  async scanItem() {
+    try {
+      const res = await wx.scanCode({ scanType: ['qrCode'], onlyFromCamera: false });
+      const raw = (res && res.result) || '';
+      const match = raw.match(/(\d+)\s*$/);
+      const id = match ? match[1] : '';
+      if (!id) {
+        wx.showToast({ title: '二维码格式无法识别', icon: 'none' });
+        return;
+      }
+      wx.navigateTo({ url: `/pages/item/detail/index?id=${id}` });
+    } catch (error) {
+      // user cancelled scan
+    }
+  },
 });

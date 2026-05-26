@@ -279,3 +279,13 @@ export class UploadMarkerDto {
   @IsNotEmpty()
   marker?: string;
 }
+
+export class UsageActionDto {
+  @IsInt()
+  @Transform(({ value }) => Number(value))
+  itemId: number;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}

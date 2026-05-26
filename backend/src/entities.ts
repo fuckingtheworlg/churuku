@@ -367,6 +367,54 @@ export class StockOrderItemEntity {
   quantity: number;
 }
 
+@Entity('equipment_usage')
+export class EquipmentUsageEntity {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ name: 'dept_id' })
+  deptId: number;
+
+  @ManyToOne(() => DeptEntity, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'dept_id' })
+  dept?: DeptEntity;
+
+  @Column({ name: 'item_id' })
+  itemId: number;
+
+  @ManyToOne(() => ItemEntity, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'item_id' })
+  item?: ItemEntity;
+
+  @Column({ name: 'operator_user_id', nullable: true })
+  operatorUserId?: number;
+
+  @ManyToOne(() => UserEntity, {
+    nullable: true,
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({ name: 'operator_user_id' })
+  operatorUser?: UserEntity;
+
+  @Column({ name: 'operator_name', nullable: true })
+  operatorName?: string;
+
+  @Column({ name: 'started_at', type: 'datetime' })
+  startedAt: Date;
+
+  @Column({ name: 'ended_at', type: 'datetime', nullable: true })
+  endedAt?: Date | null;
+
+  @Column({ name: 'duration_minutes', nullable: true })
+  durationMinutes?: number | null;
+
+  @Column({ nullable: true })
+  note?: string;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+}
+
 export const entities = [
   AdminEntity,
   DeptEntity,
@@ -377,4 +425,5 @@ export const entities = [
   StockRecordEntity,
   StockOrderEntity,
   StockOrderItemEntity,
+  EquipmentUsageEntity,
 ];

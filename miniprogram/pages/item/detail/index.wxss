@@ -16,6 +16,34 @@
   font-weight: 700;
 }
 
+.usage-card {
+  background: #f0fdf4;
+}
+
+.status-active {
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+  background: #16a34a;
+  color: #fff;
+  font-size: 24rpx;
+}
+
+.status-idle {
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+  background: #94a3b8;
+  color: #fff;
+  font-size: 24rpx;
+}
+
+.usage-actions {
+  margin-top: 18rpx;
+}
+
+.usage-row {
+  background: #fefce8;
+}
+
 .thumbs {
   display: flex;
   flex-wrap: wrap;

@@ -583,11 +583,50 @@ const ItemPage = defineComponent({
       await api.deleteItem(row.id, true);
       await load();
     }
+    const qrDialog = ref(false);
+    const qrItem = ref<Item | null>(null);
+    const qrImgUrl = ref('');
+    async function showQrCode(row: Item) {
+      qrItem.value = row;
+      qrDialog.value = true;
+      qrImgUrl.value = '';
+      const res = await fetch(api.itemQrcodeUrl(row.id, 'png'), {
+        headers: { Authorization: `Bearer ${localStorage.getItem('admin_token') || ''}` },
+      });
+      if (!res.ok) {
+        ElMessage.error('二维码加载失败');
+        return;
+      }
+      const blob = await res.blob();
+      qrImgUrl.value = URL.createObjectURL(blob);
+    }
+    async function downloadQr(format: 'png' | 'pdf') {
+      if (!qrItem.value) return;
+      const res = await fetch(api.itemQrcodeUrl(qrItem.value.id, format), {
+        headers: { Authorization: `Bearer ${localStorage.getItem('admin_token') || ''}` },
+      });
+      if (!res.ok) {
+        ElMessage.error('下载失败');
+        return;
+      }
+      const blob = await res.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `item-${qrItem.value.id}-qrcode.${format}`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+    function closeQrDialog() {
+      if (qrImgUrl.value) URL.revokeObjectURL(qrImgUrl.value);
+      qrImgUrl.value = '';
+      qrDialog.value = false;
+      qrItem.value = null;
+    }
     onMounted(async () => {
       await loadQueryCategories();
       await load();
     });
-    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove };
+    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog };
   },
   template: `
     <div class="page-card">
@@ -610,12 +649,29 @@ const ItemPage = defineComponent({
         <el-table-column prop="quantity" label="库存" />
         <el-table-column prop="unit" label="单位" />
         <el-table-column prop="location" label="存放位置" />
-        <el-table-column label="操作" width="160"><template #default="{row}">
+        <el-table-column label="操作" width="240"><template #default="{row}">
           <el-button link type="primary" @click="open(row)">编辑</el-button>
+          <el-button link type="success" @click="showQrCode(row)">二维码</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
           <el-button v-if="props.isSuper" link type="danger" @click="forceRemove(row)">强制删除</el-button>
         </template></el-table-column>
       </el-table>
+      <el-dialog :model-value="qrDialog" title="设备二维码" width="380px" @close="closeQrDialog">
+        <div style="text-align:center" v-if="qrItem">
+          <p><b>{{ qrItem.name }}</b></p>
+          <p class="muted">{{ qrItem.spec || '无规格' }}</p>
+          <div style="margin:12px 0">
+            <img v-if="qrImgUrl" :src="qrImgUrl" style="width:260px;height:260px" />
+            <span v-else class="muted">生成中…</span>
+          </div>
+          <p class="muted">小程序「扫码出入库」扫描后，可直接进入该设备详情。</p>
+        </div>
+        <template #footer>
+          <el-button @click="downloadQr('png')" :disabled="!qrItem">下载 PNG</el-button>
+          <el-button @click="downloadQr('pdf')" :disabled="!qrItem">下载打印 PDF</el-button>
+          <el-button type="primary" @click="closeQrDialog">关闭</el-button>
+        </template>
+      </el-dialog>
       <el-dialog v-model="dialog" title="物品">
         <el-form label-width="90px">
           <el-form-item label="部门"><el-select v-model="form.deptId" filterable clearable placeholder="选择部门/仓库" @change="changeFormDept" @clear="changeFormDept"><el-option v-for="d in props.depts" :key="d.id" :label="d.name" :value="d.id" /></el-select></el-form-item>

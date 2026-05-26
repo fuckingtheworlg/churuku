@@ -8,6 +8,7 @@ import { AppController } from './controllers';
 import {
   AdminEntity,
   DeptEntity,
+  EquipmentUsageEntity,
   GlobalItemCategoryEntity,
   ItemCategoryEntity,
   ItemEntity,
@@ -58,6 +59,7 @@ import { AdminGuard, MiniGuard } from './support';
       StockRecordEntity,
       StockOrderEntity,
       StockOrderItemEntity,
+      EquipmentUsageEntity,
     ]),
   ],
   controllers: [AppController],

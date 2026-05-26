@@ -119,6 +119,7 @@ export const api = {
   saveItem: (data: Record<string, unknown>, id?: number) =>
     id ? request.patch(`/item/${id}`, data) : request.post('/item', data),
   deleteItem: (id: number, force = false) => request.delete(`/item/${id}`, { params: { force } }),
+  itemQrcodeUrl: (id: number, format: 'png' | 'pdf' = 'png') => `/api/item/${id}/qrcode?format=${format}`,
   records: (params: Record<string, unknown>) => request.get('/stock-record', { params }),
   deleteRecord: (id: number) => request.delete(`/stock-record/${id}`),
   bulkDeleteRecords: (ids: number[]) => request.post('/stock-record/batch-delete', { ids }),
