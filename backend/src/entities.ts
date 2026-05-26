@@ -405,7 +405,7 @@ export class EquipmentUsageEntity {
   @Column({ name: 'ended_at', type: 'datetime', nullable: true })
   endedAt?: Date | null;
 
-  @Column({ name: 'duration_minutes', nullable: true })
+  @Column({ name: 'duration_minutes', type: 'int', nullable: true })
   durationMinutes?: number | null;
 
   @Column({ nullable: true })
