@@ -15,7 +15,7 @@ import { Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun } from
 import { Workbook } from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { existsSync } from 'fs';
-import { Brackets, IsNull, Repository } from 'typeorm';
+import { Brackets, In, IsNull, Repository } from 'typeorm';
 import * as QRCode from 'qrcode';
 import {
   AdminAccountDto,
@@ -461,7 +461,57 @@ export class AppService {
       );
     }
     const [list, total] = await qb.getManyAndCount();
-    return { list, total, page, pageSize };
+    const enriched = await this.attachUsageSummary(list);
+    return { list: enriched, total, page, pageSize };
+  }
+
+  private async attachUsageSummary(items: ItemEntity[]) {
+    if (!items.length) return items;
+    const ids = items.map((it) => it.id);
+    const [openSessions, totals] = await Promise.all([
+      this.usageRepo.find({
+        where: { itemId: In(ids), endedAt: IsNull() },
+        relations: ['operatorUser'],
+        order: { startedAt: 'DESC' },
+      }),
+      this.usageRepo
+        .createQueryBuilder('u')
+        .select('u.item_id', 'itemId')
+        .addSelect('COALESCE(SUM(u.duration_minutes), 0)', 'total')
+        .where('u.item_id IN (:...ids)', { ids })
+        .andWhere('u.ended_at IS NOT NULL')
+        .groupBy('u.item_id')
+        .getRawMany<{ itemId: string | number; total: string | number }>(),
+    ]);
+    const openMap = new Map<number, typeof openSessions[number]>();
+    openSessions.forEach((session) => {
+      if (!openMap.has(session.itemId)) openMap.set(session.itemId, session);
+    });
+    const totalMap = new Map<number, number>();
+    totals.forEach((row) => {
+      totalMap.set(Number(row.itemId), Number(row.total) || 0);
+    });
+    const now = Date.now();
+    return items.map((row) => {
+      const open = openMap.get(row.id);
+      const ongoingMinutes = open
+        ? Math.max(0, Math.round((now - new Date(open.startedAt).getTime()) / 60000))
+        : 0;
+      const ongoing = open
+        ? {
+            id: open.id,
+            operatorName:
+              open.operatorName || open.operatorUser?.realName || '未知',
+            startedAt: open.startedAt,
+            durationMinutes: ongoingMinutes,
+          }
+        : null;
+      const totalEnded = totalMap.get(row.id) || 0;
+      return Object.assign(row, {
+        usageOngoing: ongoing,
+        usageTotalMinutes: totalEnded + ongoingMinutes,
+      });
+    });
   }
 
   async getItem(id: number, actor: JwtActor) {
@@ -529,6 +579,30 @@ export class AppService {
     if (dto.note) {
       open.note = open.note ? `${open.note}；${dto.note}` : dto.note;
     }
+    await this.usageRepo.save(open);
+    return this.getItemUsageSummary(actor, item.id);
+  }
+
+  async forceEndUsageByAdmin(actor: JwtActor, dto: UsageActionDto) {
+    if (actor.role !== 'admin') {
+      throw new ForbiddenException('需要管理员权限');
+    }
+    const item = await this.getItem(dto.itemId, actor);
+    const open = await this.usageRepo.findOne({
+      where: { itemId: item.id, endedAt: IsNull() },
+      order: { startedAt: 'DESC' },
+    });
+    if (!open) {
+      throw new BadRequestException('该设备当前不在使用中');
+    }
+    const endedAt = new Date();
+    const startedAt = new Date(open.startedAt);
+    const durationMinutes = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000));
+    open.endedAt = endedAt;
+    open.durationMinutes = durationMinutes;
+    const adminName = actor.username || '管理员';
+    const reason = dto.note ? `管理员强制结束(${adminName})：${dto.note}` : `管理员强制结束(${adminName})`;
+    open.note = open.note ? `${open.note}；${reason}` : reason;
     await this.usageRepo.save(open);
     return this.getItemUsageSummary(actor, item.id);
   }

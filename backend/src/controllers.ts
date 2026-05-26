@@ -291,6 +291,12 @@ export class AppController {
   }
 
   @UseGuards(AdminGuard)
+  @Post('usage/force-end')
+  adminForceEndUsage(@Req() req: AuthedRequest, @Body() dto: UsageActionDto) {
+    return this.service.forceEndUsageByAdmin(requireActor(req), dto);
+  }
+
+  @UseGuards(AdminGuard)
   @Get('item/:id/qrcode')
   async exportItemQrCode(
     @Req() req: AuthedRequest,

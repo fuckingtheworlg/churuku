@@ -60,6 +60,34 @@ export interface Item {
   image?: string;
   dept?: Dept;
   category?: { id: number; name: string };
+  usageOngoing?: {
+    id: number;
+    operatorName: string;
+    startedAt: string;
+    durationMinutes: number;
+  } | null;
+  usageTotalMinutes?: number;
+}
+
+export interface UsageRecord {
+  id: number;
+  operatorName: string;
+  startedAt: string;
+  endedAt?: string | null;
+  durationMinutes?: number | null;
+  note?: string;
+}
+
+export interface UsageSummary {
+  item: Item;
+  ongoing: {
+    id: number;
+    operatorName: string;
+    startedAt: string;
+    durationMinutes: number;
+  } | null;
+  totalMinutes: number;
+  recent: UsageRecord[];
 }
 
 export interface User {
@@ -120,6 +148,8 @@ export const api = {
     id ? request.patch(`/item/${id}`, data) : request.post('/item', data),
   deleteItem: (id: number, force = false) => request.delete(`/item/${id}`, { params: { force } }),
   itemQrcodeUrl: (id: number, format: 'png' | 'pdf' = 'png') => `/api/item/${id}/qrcode?format=${format}`,
+  itemUsage: (id: number) => request.get(`/item/${id}/usage`),
+  forceEndUsage: (itemId: number, note?: string) => request.post('/usage/force-end', { itemId, note }),
   records: (params: Record<string, unknown>) => request.get('/stock-record', { params }),
   deleteRecord: (id: number) => request.delete(`/stock-record/${id}`),
   bulkDeleteRecords: (ids: number[]) => request.post('/stock-record/batch-delete', { ids }),

@@ -622,11 +622,65 @@ const ItemPage = defineComponent({
       qrDialog.value = false;
       qrItem.value = null;
     }
+    const usageDialog = ref(false);
+    const usageLoading = ref(false);
+    const usageSummary = ref<any>(null);
+    const usageItem = ref<Item | null>(null);
+    function formatUsageMinutes(total: number | undefined | null) {
+      const minutes = Math.max(0, Math.round(Number(total) || 0));
+      if (!minutes) return '0 分钟';
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      if (!h) return `${m} 分钟`;
+      if (!m) return `${h} 小时`;
+      return `${h} 小时 ${m} 分钟`;
+    }
+    function formatUsageDateTime(value: string | undefined | null) {
+      if (!value) return '';
+      return dayjs(value).format('YYYY-MM-DD HH:mm');
+    }
+    async function showUsage(row: Item) {
+      usageItem.value = row;
+      usageDialog.value = true;
+      usageSummary.value = null;
+      usageLoading.value = true;
+      try {
+        usageSummary.value = await api.itemUsage(row.id);
+      } catch (error: any) {
+        ElMessage.error(error?.message || '加载使用情况失败');
+      } finally {
+        usageLoading.value = false;
+      }
+    }
+    async function forceEndUsage() {
+      if (!usageItem.value) return;
+      const note = await ElMessageBox.prompt('请输入强制结束原因（可选）', '强制结束使用', {
+        confirmButtonText: '确认结束',
+        cancelButtonText: '取消',
+        inputPlaceholder: '例如：现场员工忘记点结束',
+      }).catch(() => null);
+      if (note === null) return;
+      usageLoading.value = true;
+      try {
+        usageSummary.value = await api.forceEndUsage(usageItem.value.id, note.value || undefined);
+        ElMessage.success('已强制结束');
+        await load();
+      } catch (error: any) {
+        ElMessage.error(error?.message || '操作失败');
+      } finally {
+        usageLoading.value = false;
+      }
+    }
+    function closeUsageDialog() {
+      usageDialog.value = false;
+      usageItem.value = null;
+      usageSummary.value = null;
+    }
     onMounted(async () => {
       await loadQueryCategories();
       await load();
     });
-    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog };
+    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog, usageDialog, usageLoading, usageSummary, usageItem, showUsage, forceEndUsage, closeUsageDialog, formatUsageMinutes, formatUsageDateTime };
   },
   template: `
     <div class="page-card">
@@ -649,13 +703,51 @@ const ItemPage = defineComponent({
         <el-table-column prop="quantity" label="库存" />
         <el-table-column prop="unit" label="单位" />
         <el-table-column prop="location" label="存放位置" />
-        <el-table-column label="操作" width="240"><template #default="{row}">
+        <el-table-column label="使用状态" min-width="180"><template #default="{row}">
+          <el-tag v-if="row.usageOngoing" type="success">使用中 · {{ formatUsageMinutes(row.usageOngoing.durationMinutes) }}</el-tag>
+          <el-tag v-else type="info">空闲</el-tag>
+          <div class="muted" style="margin-top:4px">累计 {{ formatUsageMinutes(row.usageTotalMinutes) }}</div>
+        </template></el-table-column>
+        <el-table-column label="操作" width="320"><template #default="{row}">
           <el-button link type="primary" @click="open(row)">编辑</el-button>
+          <el-button link type="primary" @click="showUsage(row)">使用情况</el-button>
           <el-button link type="success" @click="showQrCode(row)">二维码</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
           <el-button v-if="props.isSuper" link type="danger" @click="forceRemove(row)">强制删除</el-button>
         </template></el-table-column>
       </el-table>
+      <el-dialog :model-value="usageDialog" title="设备使用情况" width="640px" @close="closeUsageDialog">
+        <div v-if="usageItem">
+          <p><b>{{ usageItem.name }}</b> <span class="muted">{{ usageItem.spec || '' }}</span></p>
+          <div v-if="usageLoading" class="muted">加载中…</div>
+          <template v-else-if="usageSummary">
+            <div style="margin:12px 0">
+              <el-tag v-if="usageSummary.ongoing" type="success" effect="dark">使用中 · {{ formatUsageMinutes(usageSummary.ongoing.durationMinutes) }}</el-tag>
+              <el-tag v-else type="info">空闲</el-tag>
+              <span class="muted" style="margin-left:12px">累计：{{ formatUsageMinutes(usageSummary.totalMinutes) }}</span>
+            </div>
+            <div v-if="usageSummary.ongoing" class="page-card" style="background:#f0fdf4">
+              <div>当前使用人：{{ usageSummary.ongoing.operatorName }}</div>
+              <div>开始时间：{{ formatUsageDateTime(usageSummary.ongoing.startedAt) }}</div>
+              <div>本次已用：{{ formatUsageMinutes(usageSummary.ongoing.durationMinutes) }}</div>
+              <div style="margin-top:12px">
+                <el-button type="danger" :loading="usageLoading" @click="forceEndUsage">强制结束</el-button>
+              </div>
+            </div>
+            <p class="muted" style="margin-top:18px">最近使用记录</p>
+            <el-table :data="usageSummary.recent || []" size="small">
+              <el-table-column label="操作人" prop="operatorName" width="120" />
+              <el-table-column label="开始"><template #default="{row}">{{ formatUsageDateTime(row.startedAt) }}</template></el-table-column>
+              <el-table-column label="结束"><template #default="{row}">{{ row.endedAt ? formatUsageDateTime(row.endedAt) : '使用中' }}</template></el-table-column>
+              <el-table-column label="时长" width="120"><template #default="{row}">{{ row.endedAt ? formatUsageMinutes(row.durationMinutes) : '-' }}</template></el-table-column>
+              <el-table-column label="备注"><template #default="{row}">{{ row.note || '-' }}</template></el-table-column>
+            </el-table>
+          </template>
+        </div>
+        <template #footer>
+          <el-button type="primary" @click="closeUsageDialog">关闭</el-button>
+        </template>
+      </el-dialog>
       <el-dialog :model-value="qrDialog" title="设备二维码" width="380px" @close="closeQrDialog">
         <div style="text-align:center" v-if="qrItem">
           <p><b>{{ qrItem.name }}</b></p>
