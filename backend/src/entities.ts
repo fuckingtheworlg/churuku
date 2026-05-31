@@ -381,7 +381,7 @@ export class StockOrderEntity {
   @Column({ name: 'completed_at', type: 'datetime', nullable: true })
   completedAt?: Date | null;
 
-  @Column({ name: 'related_order_id', nullable: true })
+  @Column({ name: 'related_order_id', type: 'int', nullable: true })
   relatedOrderId?: number | null;
 
   @OneToMany(() => StockOrderItemEntity, (item) => item.order)
