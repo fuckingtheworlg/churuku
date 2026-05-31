@@ -12,7 +12,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { AdminRole, StockType, UserStatus } from './entities';
+import { AdminRole, ItemUnitStatus, StockType, UserStatus } from './entities';
 
 export class LoginDto {
   @IsString()
@@ -154,12 +154,35 @@ export class ItemDto {
   quantity?: number;
 
   @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true' || value === 1 || value === '1')
+  trackIndividually?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Transform(({ value }) =>
+    value === undefined || value === null || value === '' ? null : Number(value),
+  )
+  maxUsageMinutes?: number | null;
+
+  @IsOptional()
   @IsString()
   note?: string;
 
   @IsOptional()
   @IsString()
   image?: string;
+}
+
+export class ItemUnitUpdateDto {
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @IsOptional()
+  @IsEnum(ItemUnitStatus)
+  status?: ItemUnitStatus;
 }
 
 export class StockRecordItemDto {
@@ -171,6 +194,11 @@ export class StockRecordItemDto {
   @Min(1)
   @Transform(({ value }) => Number(value))
   quantity: number;
+
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }) => (Array.isArray(value) ? value.map(Number) : value))
+  unitIds?: number[];
 }
 
 export class StockRecordDto {
@@ -229,6 +257,11 @@ export class StockRecordDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Transform(({ value }) => (value ? Number(value) : undefined))
+  relatedOrderId?: number;
 }
 
 export class PageQueryDto {
@@ -284,6 +317,11 @@ export class UsageActionDto {
   @IsInt()
   @Transform(({ value }) => Number(value))
   itemId: number;
+
+  @IsOptional()
+  @IsInt()
+  @Transform(({ value }) => (value ? Number(value) : undefined))
+  unitId?: number;
 
   @IsOptional()
   @IsString()

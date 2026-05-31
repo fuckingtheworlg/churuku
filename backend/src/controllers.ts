@@ -25,6 +25,7 @@ import {
   DeptDto,
   GlobalCategoryDto,
   ItemDto,
+  ItemUnitUpdateDto,
   LoginDto,
   PageQueryDto,
   StockRecordDto,
@@ -276,6 +277,63 @@ export class AppController {
   @Get('item/:id/usage')
   adminGetItemUsage(@Req() req: AuthedRequest, @Param('id') id: string) {
     return this.service.getItemUsageSummary(requireActor(req), Number(id));
+  }
+
+  @UseGuards(AdminGuard)
+  @Get('item/:id/units')
+  adminListItemUnits(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.listItemUnits(requireActor(req), Number(id));
+  }
+
+  @UseGuards(MiniGuard)
+  @Get('mini/item/:id/units')
+  miniListItemUnits(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.listItemUnits(requireActor(req), Number(id));
+  }
+
+  @UseGuards(AdminGuard)
+  @Patch('item-unit/:id')
+  updateItemUnit(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: ItemUnitUpdateDto) {
+    return this.service.updateUnit(requireActor(req), Number(id), dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @Delete('item-unit/:id')
+  deleteItemUnit(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.deleteUnit(requireActor(req), Number(id));
+  }
+
+  @UseGuards(AdminGuard)
+  @Get('item-unit/:id/qrcode')
+  async exportUnitQrCode(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Query('format') format: string | undefined,
+    @Res() res: Response,
+  ) {
+    const file = await this.service.buildUnitQrCode(requireActor(req), Number(id), format);
+    const filename = `unit-${id}-qrcode.${file.ext}`;
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.send(file.buffer);
+  }
+
+  @UseGuards(MiniGuard)
+  @Get('mini/unit/:id')
+  miniGetUnit(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.getUnitView(requireActor(req), Number(id));
+  }
+
+  @UseGuards(MiniGuard)
+  @Get('mini/returnable-orders')
+  miniReturnableOrders(@Req() req: AuthedRequest, @Query('deptId') deptId?: string) {
+    return this.service.listReturnableOrders(requireActor(req), deptId ? Number(deptId) : undefined);
+  }
+
+  @UseGuards(AdminGuard)
+  @Get('returnable-orders')
+  adminReturnableOrders(@Req() req: AuthedRequest, @Query('deptId') deptId?: string) {
+    return this.service.listReturnableOrders(requireActor(req), deptId ? Number(deptId) : undefined);
   }
 
   @UseGuards(MiniGuard)

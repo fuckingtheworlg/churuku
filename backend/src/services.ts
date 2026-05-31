@@ -24,6 +24,7 @@ import {
   DeptDto,
   GlobalCategoryDto,
   ItemDto,
+  ItemUnitUpdateDto,
   LoginDto,
   PageQueryDto,
   StockRecordDto,
@@ -40,8 +41,11 @@ import {
   GlobalItemCategoryEntity,
   ItemCategoryEntity,
   ItemEntity,
+  ItemUnitEntity,
+  ItemUnitStatus,
   StockOrderEntity,
   StockOrderItemEntity,
+  StockOrderUnitEntity,
   StockRecordEntity,
   StockType,
   UserEntity,
@@ -74,6 +78,10 @@ export class AppService {
     private readonly orderItemRepo: Repository<StockOrderItemEntity>,
     @InjectRepository(EquipmentUsageEntity)
     private readonly usageRepo: Repository<EquipmentUsageEntity>,
+    @InjectRepository(ItemUnitEntity)
+    private readonly unitRepo: Repository<ItemUnitEntity>,
+    @InjectRepository(StockOrderUnitEntity)
+    private readonly orderUnitRepo: Repository<StockOrderUnitEntity>,
   ) {}
 
   async seedAdmin() {
@@ -416,7 +424,7 @@ export class AppService {
     const deptId = requireDeptId(actor, dto.deptId);
     const item = id
       ? await this.itemRepo.findOneBy({ id, deptId })
-      : this.itemRepo.create({ deptId, quantity: 0 });
+      : this.itemRepo.create({ deptId, quantity: 0, trackIndividually: false });
     if (!item) throw new NotFoundException('物品不存在');
     Object.assign(item, {
       categoryId: dto.categoryId,
@@ -427,14 +435,175 @@ export class AppService {
       note: dto.note,
       image: dto.image,
     });
+    if (dto.trackIndividually !== undefined) {
+      item.trackIndividually = dto.trackIndividually;
+    }
+    if (dto.maxUsageMinutes !== undefined) {
+      item.maxUsageMinutes = dto.maxUsageMinutes;
+    }
+    let desiredQuantity = item.quantity;
     if (dto.quantity !== undefined && dto.quantity !== null) {
       const value = Number(dto.quantity);
       if (!Number.isFinite(value) || value < 0) {
         throw new BadRequestException('数量不能小于 0');
       }
-      item.quantity = value;
+      desiredQuantity = value;
     }
-    return this.itemRepo.save(item);
+    if (!item.trackIndividually) {
+      item.quantity = desiredQuantity;
+    }
+    const saved = await this.itemRepo.save(item);
+    if (saved.trackIndividually) {
+      await this.ensureUnits(saved, desiredQuantity);
+      await this.syncItemQuantity(saved.id);
+      return this.itemRepo.findOneBy({ id: saved.id });
+    }
+    return saved;
+  }
+
+  private async ensureUnits(item: ItemEntity, targetQuantity: number) {
+    const existing = await this.unitRepo.find({
+      where: { itemId: item.id },
+      order: { id: 'ASC' },
+    });
+    if (targetQuantity <= existing.length) return;
+    let maxNum = 0;
+    existing.forEach((u) => {
+      const n = parseInt(u.code, 10);
+      if (!Number.isNaN(n) && n > maxNum) maxNum = n;
+    });
+    const toCreate: ItemUnitEntity[] = [];
+    for (let i = existing.length; i < targetQuantity; i += 1) {
+      maxNum += 1;
+      toCreate.push(
+        this.unitRepo.create({
+          deptId: item.deptId,
+          itemId: item.id,
+          code: String(maxNum),
+          status: ItemUnitStatus.InStock,
+          accumulatedMinutes: 0,
+        }),
+      );
+    }
+    if (toCreate.length) await this.unitRepo.save(toCreate);
+  }
+
+  private async syncItemQuantity(itemId: number) {
+    const item = await this.itemRepo.findOneBy({ id: itemId });
+    if (!item || !item.trackIndividually) return;
+    const inStock = await this.unitRepo.countBy({
+      itemId,
+      status: ItemUnitStatus.InStock,
+    });
+    item.quantity = inStock;
+    await this.itemRepo.save(item);
+  }
+
+  async listItemUnits(actor: JwtActor, itemId: number) {
+    const item = await this.getItem(itemId, actor);
+    return this.buildUnitViews(item);
+  }
+
+  async getUnitView(actor: JwtActor, unitId: number) {
+    const unit = await this.unitRepo.findOneBy({ id: unitId });
+    if (!unit) throw new NotFoundException('设备单元不存在');
+    this.assertDeptAccess(actor, unit.deptId);
+    const item = await this.getItem(unit.itemId, actor);
+    const views = await this.buildUnitViews(item);
+    const view = views.find((v) => v.id === unit.id) || null;
+    return { item, unit: view };
+  }
+
+  async listReturnableOrders(actor: JwtActor, deptId?: number) {
+    const scopedDeptId = resolveDeptId(actor, deptId);
+    const qb = this.orderRepo
+      .createQueryBuilder('record')
+      .leftJoinAndSelect('record.dept', 'dept')
+      .leftJoinAndSelect('record.items', 'orderItem')
+      .leftJoinAndSelect('orderItem.item', 'item')
+      .leftJoinAndSelect('record.units', 'orderUnit')
+      .leftJoinAndSelect('orderUnit.unit', 'unit')
+      .where('record.type = :type', { type: StockType.Out })
+      .andWhere('record.completed = :completed', { completed: false })
+      .orderBy('record.occurredAt', 'DESC')
+      .limit(200);
+    if (scopedDeptId) qb.andWhere('record.deptId = :deptId', { deptId: scopedDeptId });
+    if (actor.role === 'mini') {
+      qb.andWhere('record.operatorUserId = :uid', { uid: actor.id });
+    }
+    const rows = await qb.getMany();
+    return rows.map((row) => this.presentStockOrder(row));
+  }
+
+  private async buildUnitViews(item: ItemEntity) {
+    const units = await this.unitRepo.find({
+      where: { itemId: item.id },
+      order: { id: 'ASC' },
+    });
+    if (!units.length) return [];
+    const open = await this.usageRepo.find({
+      where: { unitId: In(units.map((u) => u.id)), endedAt: IsNull() },
+      relations: ['operatorUser'],
+    });
+    const openMap = new Map<number, (typeof open)[number]>();
+    open.forEach((session) => {
+      if (session.unitId && !openMap.has(session.unitId)) openMap.set(session.unitId, session);
+    });
+    const now = Date.now();
+    return units.map((u) => {
+      const session = openMap.get(u.id);
+      const ongoingMinutes = session
+        ? Math.max(0, Math.round((now - new Date(session.startedAt).getTime()) / 60000))
+        : 0;
+      return {
+        id: u.id,
+        itemId: u.itemId,
+        code: u.code,
+        status: u.status,
+        inUse: !!session,
+        accumulatedMinutes: u.accumulatedMinutes + ongoingMinutes,
+        maxUsageMinutes: item.maxUsageMinutes ?? null,
+        ongoing: session
+          ? {
+              operatorName: session.operatorName || session.operatorUser?.realName || '未知',
+              startedAt: session.startedAt,
+              durationMinutes: ongoingMinutes,
+            }
+          : null,
+      };
+    });
+  }
+
+  async updateUnit(actor: JwtActor, unitId: number, dto: ItemUnitUpdateDto) {
+    const unit = await this.unitRepo.findOneBy({ id: unitId });
+    if (!unit) throw new NotFoundException('设备单元不存在');
+    this.assertDeptAccess(actor, unit.deptId);
+    if (dto.code !== undefined && dto.code.trim()) {
+      unit.code = dto.code.trim();
+    }
+    if (dto.status !== undefined) {
+      if (unit.status === ItemUnitStatus.Out && dto.status === ItemUnitStatus.InStock) {
+        throw new BadRequestException('该设备在外（已出库），请通过入库归还');
+      }
+      unit.status = dto.status;
+    }
+    await this.unitRepo.save(unit);
+    await this.syncItemQuantity(unit.itemId);
+    return unit;
+  }
+
+  async deleteUnit(actor: JwtActor, unitId: number) {
+    const unit = await this.unitRepo.findOneBy({ id: unitId });
+    if (!unit) throw new NotFoundException('设备单元不存在');
+    this.assertDeptAccess(actor, unit.deptId);
+    if (unit.status === ItemUnitStatus.Out) {
+      throw new BadRequestException('该设备在外（已出库），不能删除');
+    }
+    const open = await this.usageRepo.countBy({ unitId, endedAt: IsNull() });
+    if (open > 0) throw new BadRequestException('该设备正在使用中，不能删除');
+    await this.unitRepo.delete(unitId);
+    await this.syncItemQuantity(unit.itemId);
+    return true;
   }
 
   async listItems(actor: JwtActor, query: PageQueryDto) {
@@ -491,6 +660,40 @@ export class AppService {
     totals.forEach((row) => {
       totalMap.set(Number(row.itemId), Number(row.total) || 0);
     });
+    const individualIds = items.filter((it) => it.trackIndividually).map((it) => it.id);
+    const unitStatsMap = new Map<
+      number,
+      { total: number; inStock: number; out: number; retired: number; inUse: number; totalMinutes: number }
+    >();
+    if (individualIds.length) {
+      const units = await this.unitRepo.find({ where: { itemId: In(individualIds) } });
+      const openUnits = await this.usageRepo.find({
+        where: { unitId: In(units.map((u) => u.id).length ? units.map((u) => u.id) : [0]), endedAt: IsNull() },
+      });
+      const inUseUnitIds = new Set(openUnits.map((s) => s.unitId));
+      const openByUnit = new Map<number, Date>();
+      openUnits.forEach((s) => {
+        if (s.unitId) openByUnit.set(s.unitId, new Date(s.startedAt));
+      });
+      const now2 = Date.now();
+      units.forEach((u) => {
+        const stat =
+          unitStatsMap.get(u.itemId) ||
+          { total: 0, inStock: 0, out: 0, retired: 0, inUse: 0, totalMinutes: 0 };
+        stat.total += 1;
+        if (u.status === ItemUnitStatus.InStock) stat.inStock += 1;
+        else if (u.status === ItemUnitStatus.Out) stat.out += 1;
+        else if (u.status === ItemUnitStatus.Retired) stat.retired += 1;
+        let minutes = u.accumulatedMinutes;
+        if (inUseUnitIds.has(u.id)) {
+          stat.inUse += 1;
+          const started = openByUnit.get(u.id);
+          if (started) minutes += Math.max(0, Math.round((now2 - started.getTime()) / 60000));
+        }
+        stat.totalMinutes += minutes;
+        unitStatsMap.set(u.itemId, stat);
+      });
+    }
     const now = Date.now();
     return items.map((row) => {
       const open = openMap.get(row.id);
@@ -507,9 +710,13 @@ export class AppService {
           }
         : null;
       const totalEnded = totalMap.get(row.id) || 0;
+      const unitStats = unitStatsMap.get(row.id) || null;
       return Object.assign(row, {
         usageOngoing: ongoing,
-        usageTotalMinutes: totalEnded + ongoingMinutes,
+        usageTotalMinutes: row.trackIndividually
+          ? unitStats?.totalMinutes || 0
+          : totalEnded + ongoingMinutes,
+        unitStats,
       });
     });
   }
@@ -534,15 +741,69 @@ export class AppService {
     if (force && this.isSuperAdmin(actor)) {
       await this.forceDeleteItemHistory(item.id);
       await this.usageRepo.delete({ itemId: item.id });
+      await this.unitRepo.delete({ itemId: item.id });
     }
     await this.itemRepo.delete(id);
     return true;
   }
 
+  private async resolveUsageUnit(item: ItemEntity, unitId?: number) {
+    if (!item.trackIndividually) return null;
+    if (!unitId) throw new BadRequestException('请扫描或选择具体设备（单台）');
+    const unit = await this.unitRepo.findOneBy({ id: unitId, itemId: item.id });
+    if (!unit) throw new NotFoundException('设备单元不存在');
+    return unit;
+  }
+
+  private buildOpenWhere(item: ItemEntity, unit: ItemUnitEntity | null) {
+    return unit
+      ? { unitId: unit.id, endedAt: IsNull() }
+      : { itemId: item.id, unitId: IsNull(), endedAt: IsNull() };
+  }
+
+  private async finishUsageSession(
+    open: EquipmentUsageEntity,
+    item: ItemEntity,
+    extraNote?: string,
+  ) {
+    const endedAt = new Date();
+    const startedAt = new Date(open.startedAt);
+    const durationMinutes = Math.max(
+      0,
+      Math.round((endedAt.getTime() - startedAt.getTime()) / 60000),
+    );
+    open.endedAt = endedAt;
+    open.durationMinutes = durationMinutes;
+    if (extraNote) {
+      open.note = open.note ? `${open.note}；${extraNote}` : extraNote;
+    }
+    await this.usageRepo.save(open);
+    if (open.unitId) {
+      const unit = await this.unitRepo.findOneBy({ id: open.unitId });
+      if (unit) {
+        unit.accumulatedMinutes += durationMinutes;
+        if (
+          item.maxUsageMinutes &&
+          item.maxUsageMinutes > 0 &&
+          unit.accumulatedMinutes >= item.maxUsageMinutes &&
+          unit.status !== ItemUnitStatus.Retired
+        ) {
+          unit.status = ItemUnitStatus.Retired;
+        }
+        await this.unitRepo.save(unit);
+        await this.syncItemQuantity(unit.itemId);
+      }
+    }
+  }
+
   async startUsage(actor: JwtActor, dto: UsageActionDto) {
     const item = await this.getItem(dto.itemId, actor);
+    const unit = await this.resolveUsageUnit(item, dto.unitId);
+    if (unit && unit.status === ItemUnitStatus.Retired) {
+      throw new BadRequestException('该设备已到期/停用，不能再使用');
+    }
     const open = await this.usageRepo.findOne({
-      where: { itemId: item.id, endedAt: IsNull() },
+      where: this.buildOpenWhere(item, unit),
       order: { startedAt: 'DESC' },
       relations: ['operatorUser'],
     });
@@ -553,6 +814,7 @@ export class AppService {
     const usage = this.usageRepo.create({
       deptId: item.deptId,
       itemId: item.id,
+      unitId: unit ? unit.id : null,
       operatorUserId: actor.role === 'mini' ? actor.id : undefined,
       operatorName: actor.realName || actor.username || '管理员',
       startedAt: new Date(),
@@ -564,22 +826,15 @@ export class AppService {
 
   async endUsage(actor: JwtActor, dto: UsageActionDto) {
     const item = await this.getItem(dto.itemId, actor);
+    const unit = await this.resolveUsageUnit(item, dto.unitId);
     const open = await this.usageRepo.findOne({
-      where: { itemId: item.id, endedAt: IsNull() },
+      where: this.buildOpenWhere(item, unit),
       order: { startedAt: 'DESC' },
     });
     if (!open) {
       throw new BadRequestException('该设备当前不在使用中');
     }
-    const endedAt = new Date();
-    const startedAt = new Date(open.startedAt);
-    const durationMinutes = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000));
-    open.endedAt = endedAt;
-    open.durationMinutes = durationMinutes;
-    if (dto.note) {
-      open.note = open.note ? `${open.note}；${dto.note}` : dto.note;
-    }
-    await this.usageRepo.save(open);
+    await this.finishUsageSession(open, item, dto.note);
     return this.getItemUsageSummary(actor, item.id);
   }
 
@@ -588,22 +843,19 @@ export class AppService {
       throw new ForbiddenException('需要管理员权限');
     }
     const item = await this.getItem(dto.itemId, actor);
+    const unit = await this.resolveUsageUnit(item, dto.unitId);
     const open = await this.usageRepo.findOne({
-      where: { itemId: item.id, endedAt: IsNull() },
+      where: this.buildOpenWhere(item, unit),
       order: { startedAt: 'DESC' },
     });
     if (!open) {
       throw new BadRequestException('该设备当前不在使用中');
     }
-    const endedAt = new Date();
-    const startedAt = new Date(open.startedAt);
-    const durationMinutes = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000));
-    open.endedAt = endedAt;
-    open.durationMinutes = durationMinutes;
     const adminName = actor.username || '管理员';
-    const reason = dto.note ? `管理员强制结束(${adminName})：${dto.note}` : `管理员强制结束(${adminName})`;
-    open.note = open.note ? `${open.note}；${reason}` : reason;
-    await this.usageRepo.save(open);
+    const reason = dto.note
+      ? `管理员强制结束(${adminName})：${dto.note}`
+      : `管理员强制结束(${adminName})`;
+    await this.finishUsageSession(open, item, reason);
     return this.getItemUsageSummary(actor, item.id);
   }
 
@@ -632,8 +884,12 @@ export class AppService {
     const ongoingMinutes = ongoing
       ? Math.max(0, Math.round((Date.now() - new Date(ongoing.startedAt).getTime()) / 60000))
       : 0;
+    const units = item.trackIndividually ? await this.buildUnitViews(item) : [];
+    const unitsTotalMinutes = units.reduce((sum, u) => sum + (u.accumulatedMinutes || 0), 0);
     return {
       item,
+      trackIndividually: item.trackIndividually,
+      units,
       ongoing: ongoing
         ? {
             id: ongoing.id,
@@ -644,7 +900,7 @@ export class AppService {
             durationMinutes: ongoingMinutes,
           }
         : null,
-      totalMinutes: totalEnded + ongoingMinutes,
+      totalMinutes: item.trackIndividually ? unitsTotalMinutes : totalEnded + ongoingMinutes,
       recent: recent.map((row) => ({
         id: row.id,
         operatorName: row.operatorName || row.operatorUser?.realName || '未知',
@@ -682,7 +938,37 @@ export class AppService {
     return { buffer: png, contentType: 'image/png', ext: 'png' };
   }
 
+  async buildUnitQrCode(actor: JwtActor, unitId: number, format = 'png') {
+    const unit = await this.unitRepo.findOneBy({ id: unitId });
+    if (!unit) throw new NotFoundException('设备单元不存在');
+    this.assertDeptAccess(actor, unit.deptId);
+    const item = await this.itemRepo.findOneBy({ id: unit.itemId });
+    const payload = `unit:${unit.id}`;
+    if (format === 'pdf') {
+      const png = await QRCode.toBuffer(payload, { width: 480, margin: 2, errorCorrectionLevel: 'M' });
+      const doc = new PDFDocument({ size: 'A6', margin: 24 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+      this.applyPdfFont(doc);
+      doc.fontSize(14).text(`${item?.name || '设备'} · ${unit.code} 号`, { align: 'center' });
+      doc.moveDown(0.3);
+      doc.fontSize(10).text(`${item?.spec || ''}`.trim(), { align: 'center' });
+      doc.moveDown(0.6);
+      doc.image(png, { fit: [240, 240], align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(9).text(`设备编号：${unit.code}`, { align: 'center' });
+      doc.end();
+      return { buffer: await done, contentType: 'application/pdf', ext: 'pdf' };
+    }
+    const png = await QRCode.toBuffer(payload, { width: 600, margin: 2, errorCorrectionLevel: 'M' });
+    return { buffer: png, contentType: 'image/png', ext: 'png' };
+  }
+
   async createStockRecord(actor: JwtActor, dto: StockRecordDto) {
+    if (dto.type === StockType.In && dto.relatedOrderId) {
+      return this.createReturnRecord(actor, dto);
+    }
     const lines = this.resolveStockLines(dto);
     const projectName = (dto.projectName || '').trim();
     if (!projectName) throw new BadRequestException('请填写项目名称');
@@ -690,7 +976,7 @@ export class AppService {
       lines.map(async (line) => {
         const item = await this.itemRepo.findOneBy({ id: line.itemId });
         if (!item) throw new NotFoundException(`物品不存在：${line.itemId}`);
-        return { item, quantity: line.quantity };
+        return { item, quantity: line.quantity, unitIds: line.unitIds };
       }),
     );
     const deptId = items[0].item.deptId;
@@ -698,13 +984,36 @@ export class AppService {
       throw new BadRequestException('一次出入库只能选择同一部门下的物品');
     }
     this.assertDeptAccess(actor, deptId);
-    const insufficient = items.find((line) => dto.type === StockType.Out && line.item.quantity < line.quantity);
-    if (insufficient) throw new BadRequestException(`${insufficient.item.name} 库存不足`);
-    const orderId = await this.itemRepo.manager.transaction(async (manager) => {
-      for (const line of items) {
-        line.item.quantity += dto.type === StockType.In ? line.quantity : -line.quantity;
-        await manager.save(ItemEntity, line.item);
+
+    // 校验：单台管理的物品出库必须选具体设备，且这些设备可用
+    const lineUnits = new Map<number, ItemUnitEntity[]>();
+    for (const line of items) {
+      if (line.item.trackIndividually && dto.type === StockType.Out) {
+        if (!line.unitIds.length) {
+          throw new BadRequestException(`${line.item.name} 需要选择具体设备（单台）`);
+        }
+        const units = await this.unitRepo.findBy({ id: In(line.unitIds) });
+        if (units.length !== line.unitIds.length) {
+          throw new BadRequestException(`${line.item.name} 选择的设备不存在`);
+        }
+        for (const u of units) {
+          if (u.itemId !== line.item.id) throw new BadRequestException('设备与物品不匹配');
+          if (u.status === ItemUnitStatus.Retired) {
+            throw new BadRequestException(`${line.item.name} ${u.code} 号已到期/停用，不能出库`);
+          }
+          if (u.status === ItemUnitStatus.Out) {
+            throw new BadRequestException(`${line.item.name} ${u.code} 号已在外，不能重复出库`);
+          }
+        }
+        lineUnits.set(line.item.id, units);
+      } else if (!line.item.trackIndividually && dto.type === StockType.Out) {
+        if (line.item.quantity < line.quantity) {
+          throw new BadRequestException(`${line.item.name} 库存不足`);
+        }
       }
+    }
+
+    const orderId = await this.itemRepo.manager.transaction(async (manager) => {
       const order = await manager.save(
         StockOrderEntity,
         manager.create(StockOrderEntity, {
@@ -724,18 +1033,139 @@ export class AppService {
           note: dto.note,
         }),
       );
-      await manager.save(
-        StockOrderItemEntity,
-        items.map((line) =>
+      for (const line of items) {
+        const units = lineUnits.get(line.item.id);
+        if (line.item.trackIndividually && dto.type === StockType.Out && units) {
+          for (const u of units) {
+            u.status = ItemUnitStatus.Out;
+            await manager.save(ItemUnitEntity, u);
+            await manager.save(
+              StockOrderUnitEntity,
+              manager.create(StockOrderUnitEntity, {
+                orderId: order.id,
+                itemId: line.item.id,
+                unitId: u.id,
+              }),
+            );
+          }
+        } else {
+          line.item.quantity += dto.type === StockType.In ? line.quantity : -line.quantity;
+          await manager.save(ItemEntity, line.item);
+        }
+        await manager.save(
+          StockOrderItemEntity,
           manager.create(StockOrderItemEntity, {
             orderId: order.id,
             itemId: line.item.id,
             quantity: line.quantity,
           }),
-        ),
-      );
+        );
+      }
       return order.id;
     });
+    // 出库后同步单台物品库存数量
+    for (const line of items) {
+      if (line.item.trackIndividually) await this.syncItemQuantity(line.item.id);
+    }
+    return this.getStockOrder(orderId, actor);
+  }
+
+  private async createReturnRecord(actor: JwtActor, dto: StockRecordDto) {
+    const related = await this.orderRepo.findOne({
+      where: { id: dto.relatedOrderId as number },
+      relations: ['units', 'units.unit', 'items', 'items.item'],
+    });
+    if (!related) throw new NotFoundException('要归还的出库单不存在');
+    if (related.type !== StockType.Out) throw new BadRequestException('只能归还出库单');
+    this.assertDeptAccess(actor, related.deptId);
+    if (related.completed) throw new BadRequestException('该出库单已全部归还完成');
+
+    const outUnits = (related.units || []).filter(
+      (ou) => ou.unit && ou.unit.status === ItemUnitStatus.Out,
+    );
+    const hasIndividual = outUnits.length > 0;
+    const nonIndividualLines = (related.items || []).filter(
+      (oi) => oi.item && !oi.item.trackIndividually,
+    );
+    if (!hasIndividual && nonIndividualLines.length === 0) {
+      throw new BadRequestException('该出库单没有可归还的内容');
+    }
+
+    const projectName = (dto.projectName || related.projectName || '归还入库').trim();
+    const orderId = await this.itemRepo.manager.transaction(async (manager) => {
+      const order = await manager.save(
+        StockOrderEntity,
+        manager.create(StockOrderEntity, {
+          deptId: related.deptId,
+          type: StockType.In,
+          projectName,
+          relatedOrderId: related.id,
+          operatorUserId: actor.role === 'mini' ? actor.id : undefined,
+          operatorAdminId: actor.role === 'admin' ? actor.id : undefined,
+          operatorName: actor.realName || actor.username || '管理员',
+          latitude: dto.latitude === undefined ? undefined : String(dto.latitude),
+          longitude: dto.longitude === undefined ? undefined : String(dto.longitude),
+          address: dto.address,
+          poiName: dto.poiName,
+          photos: dto.photos || [],
+          signatureUrl: dto.signatureUrl,
+          occurredAt: new Date(dto.occurredAt),
+          note: dto.note,
+        }),
+      );
+      const returnedCountByItem = new Map<number, number>();
+      for (const ou of outUnits) {
+        const unit = ou.unit as ItemUnitEntity;
+        const item = await manager.findOneBy(ItemEntity, { id: unit.itemId });
+        const overLimit =
+          item && item.maxUsageMinutes && item.maxUsageMinutes > 0
+            ? unit.accumulatedMinutes >= item.maxUsageMinutes
+            : false;
+        unit.status = overLimit ? ItemUnitStatus.Retired : ItemUnitStatus.InStock;
+        await manager.save(ItemUnitEntity, unit);
+        await manager.save(
+          StockOrderUnitEntity,
+          manager.create(StockOrderUnitEntity, {
+            orderId: order.id,
+            itemId: unit.itemId,
+            unitId: unit.id,
+          }),
+        );
+        returnedCountByItem.set(unit.itemId, (returnedCountByItem.get(unit.itemId) || 0) + 1);
+      }
+      for (const oi of nonIndividualLines) {
+        const item = await manager.findOneBy(ItemEntity, { id: oi.itemId });
+        if (item) {
+          item.quantity += oi.quantity;
+          await manager.save(ItemEntity, item);
+        }
+        returnedCountByItem.set(oi.itemId, (returnedCountByItem.get(oi.itemId) || 0) + oi.quantity);
+      }
+      for (const [itemId, quantity] of returnedCountByItem.entries()) {
+        await manager.save(
+          StockOrderItemEntity,
+          manager.create(StockOrderItemEntity, { orderId: order.id, itemId, quantity }),
+        );
+      }
+      // 判断关联出库单是否还有在外的单台
+      const remainingOut = (related.units || []).length
+        ? await manager
+            .createQueryBuilder(StockOrderUnitEntity, 'ou')
+            .leftJoin(ItemUnitEntity, 'u', 'u.id = ou.unit_id')
+            .where('ou.order_id = :oid', { oid: related.id })
+            .andWhere('u.status = :st', { st: ItemUnitStatus.Out })
+            .getCount()
+        : 0;
+      if (remainingOut === 0) {
+        related.completed = true;
+        related.completedAt = new Date();
+        await manager.save(StockOrderEntity, related);
+      }
+      return order.id;
+    });
+    for (const ou of outUnits) {
+      if (ou.unit) await this.syncItemQuantity(ou.unit.itemId);
+    }
     return this.getStockOrder(orderId, actor);
   }
 
@@ -803,6 +1233,7 @@ export class AppService {
     if (!order) throw new NotFoundException('出入库记录不存在');
     this.assertDeptAccess(actor, order.deptId);
     await this.orderRepo.manager.transaction(async (manager) => {
+      await manager.delete(StockOrderUnitEntity, { orderId: id });
       await manager.delete(StockOrderItemEntity, { orderId: id });
       await manager.delete(StockOrderEntity, { id });
     });
@@ -861,7 +1292,15 @@ export class AppService {
   private async getStockOrder(id: number, actor: JwtActor) {
     const order = await this.orderRepo.findOne({
       where: { id },
-      relations: ['dept', 'items', 'items.item', 'items.item.category', 'operatorUser'],
+      relations: [
+        'dept',
+        'items',
+        'items.item',
+        'items.item.category',
+        'units',
+        'units.unit',
+        'operatorUser',
+      ],
     });
     if (!order) throw new NotFoundException('出入库记录不存在');
     this.assertDeptAccess(actor, order.deptId);
@@ -873,19 +1312,22 @@ export class AppService {
       dto.items && dto.items.length > 0
         ? dto.items
         : dto.itemId && dto.quantity
-          ? [{ itemId: dto.itemId, quantity: dto.quantity }]
+          ? [{ itemId: dto.itemId, quantity: dto.quantity, unitIds: [] as number[] }]
           : [];
-    const merged = new Map<number, number>();
-    rawLines.forEach((line) => {
+    const result: { itemId: number; quantity: number; unitIds: number[] }[] = [];
+    rawLines.forEach((line: any) => {
       const itemId = Number(line.itemId);
-      const quantity = Number(line.quantity);
+      const unitIds = Array.isArray(line.unitIds)
+        ? line.unitIds.map(Number).filter((n: number) => Number.isFinite(n) && n > 0)
+        : [];
+      const quantity = unitIds.length ? unitIds.length : Number(line.quantity);
       if (!Number.isFinite(itemId) || itemId <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
         throw new BadRequestException('请选择物品并填写正确数量');
       }
-      merged.set(itemId, (merged.get(itemId) || 0) + quantity);
+      result.push({ itemId, quantity, unitIds });
     });
-    if (merged.size === 0) throw new BadRequestException('请至少添加一种物品');
-    return Array.from(merged.entries()).map(([itemId, quantity]) => ({ itemId, quantity }));
+    if (result.length === 0) throw new BadRequestException('请至少添加一种物品');
+    return result;
   }
 
   private presentStockOrder(order: StockOrderEntity) {
@@ -895,14 +1337,35 @@ export class AppService {
       quantity: line.quantity,
       item: line.item,
     }));
+    const unitList = (order.units || []).map((ou) => ({
+      id: ou.id,
+      itemId: ou.itemId,
+      unitId: ou.unitId,
+      code: ou.unit?.code,
+      status: ou.unit?.status,
+    }));
     const firstLine = lines[0];
+    const unitSummary = unitList.length
+      ? unitList.map((u) => `${u.code || u.unitId}号`).join('、')
+      : '';
     return {
       ...order,
       items: lines,
+      units: unitList,
       itemId: firstLine?.itemId,
       item: firstLine?.item,
       quantity: lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0),
-      itemSummary: lines.map((line) => `${line.item?.name || '未知物品'} x ${line.quantity}${line.item?.unit || ''}`).join('；'),
+      itemSummary: lines
+        .map((line) => `${line.item?.name || '未知物品'} x ${line.quantity}${line.item?.unit || ''}`)
+        .join('；'),
+      unitSummary,
+      completed: order.completed,
+      statusText:
+        order.type === StockType.In
+          ? '入库'
+          : order.completed
+            ? '已完成（已归还）'
+            : '出库待归还',
     };
   }
 
@@ -928,12 +1391,14 @@ export class AppService {
   private async forceDeleteItemHistory(itemId: number) {
     const rows = await this.orderItemRepo.findBy({ itemId });
     const orderIds = Array.from(new Set(rows.map((row) => row.orderId)));
+    await this.orderUnitRepo.delete({ itemId });
     if (rows.length > 0) {
       await this.orderItemRepo.delete({ itemId });
     }
     for (const orderId of orderIds) {
       const remain = await this.orderItemRepo.countBy({ orderId });
       if (remain === 0) {
+        await this.orderUnitRepo.delete({ orderId });
         await this.orderRepo.delete(orderId);
       }
     }
@@ -943,10 +1408,13 @@ export class AppService {
   private async forceDeleteDept(deptId: number) {
     const orderIds = (await this.orderRepo.findBy({ deptId })).map((row) => row.id);
     for (const orderId of orderIds) {
+      await this.orderUnitRepo.delete({ orderId });
       await this.orderItemRepo.delete({ orderId });
     }
     await this.orderRepo.delete({ deptId });
     await this.recordRepo.delete({ deptId });
+    await this.usageRepo.delete({ deptId });
+    await this.unitRepo.delete({ deptId });
     await this.itemRepo.delete({ deptId });
     await this.categoryRepo.delete({ deptId });
     await this.userRepo.delete({ deptId });

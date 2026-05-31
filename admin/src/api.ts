@@ -47,6 +47,26 @@ export interface GlobalCategory {
   usedCount?: number;
 }
 
+export interface UnitStats {
+  total: number;
+  inStock: number;
+  out: number;
+  retired: number;
+  inUse: number;
+  totalMinutes: number;
+}
+
+export interface ItemUnit {
+  id: number;
+  itemId: number;
+  code: string;
+  status: 'in_stock' | 'out' | 'retired';
+  inUse: boolean;
+  accumulatedMinutes: number;
+  maxUsageMinutes?: number | null;
+  ongoing?: { operatorName: string; startedAt: string; durationMinutes: number } | null;
+}
+
 export interface Item {
   id: number;
   deptId: number;
@@ -56,6 +76,8 @@ export interface Item {
   unit: string;
   location?: string;
   quantity: number;
+  trackIndividually?: boolean;
+  maxUsageMinutes?: number | null;
   note?: string;
   image?: string;
   dept?: Dept;
@@ -67,6 +89,7 @@ export interface Item {
     durationMinutes: number;
   } | null;
   usageTotalMinutes?: number;
+  unitStats?: UnitStats | null;
 }
 
 export interface UsageRecord {
@@ -105,7 +128,12 @@ export interface StockRecord {
   projectName?: string;
   quantity: number;
   itemSummary?: string;
+  unitSummary?: string;
+  completed?: boolean;
+  statusText?: string;
+  relatedOrderId?: number | null;
   items?: Array<{ id: number; itemId: number; quantity: number; item?: Item }>;
+  units?: Array<{ id: number; itemId: number; unitId: number; code?: string; status?: string }>;
   operatorName?: string;
   latitude?: string;
   longitude?: string;
@@ -148,8 +176,13 @@ export const api = {
     id ? request.patch(`/item/${id}`, data) : request.post('/item', data),
   deleteItem: (id: number, force = false) => request.delete(`/item/${id}`, { params: { force } }),
   itemQrcodeUrl: (id: number, format: 'png' | 'pdf' = 'png') => `/api/item/${id}/qrcode?format=${format}`,
+  unitQrcodeUrl: (id: number, format: 'png' | 'pdf' = 'png') => `/api/item-unit/${id}/qrcode?format=${format}`,
   itemUsage: (id: number) => request.get(`/item/${id}/usage`),
-  forceEndUsage: (itemId: number, note?: string) => request.post('/usage/force-end', { itemId, note }),
+  itemUnits: (id: number) => request.get(`/item/${id}/units`),
+  updateUnit: (id: number, data: Record<string, unknown>) => request.patch(`/item-unit/${id}`, data),
+  deleteUnit: (id: number) => request.delete(`/item-unit/${id}`),
+  forceEndUsage: (itemId: number, note?: string, unitId?: number) =>
+    request.post('/usage/force-end', { itemId, note, unitId }),
   records: (params: Record<string, unknown>) => request.get('/stock-record', { params }),
   deleteRecord: (id: number) => request.delete(`/stock-record/${id}`),
   bulkDeleteRecords: (ids: number[]) => request.post('/stock-record/batch-delete', { ids }),

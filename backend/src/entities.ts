@@ -26,6 +26,12 @@ export enum AdminRole {
   Dept = 'dept',
 }
 
+export enum ItemUnitStatus {
+  InStock = 'in_stock',
+  Out = 'out',
+  Retired = 'retired',
+}
+
 @Entity('dept')
 export class DeptEntity {
   @PrimaryGeneratedColumn()
@@ -188,6 +194,12 @@ export class ItemEntity {
   @Column({ default: 0 })
   quantity: number;
 
+  @Column({ name: 'track_individually', default: false })
+  trackIndividually: boolean;
+
+  @Column({ name: 'max_usage_minutes', type: 'int', nullable: true })
+  maxUsageMinutes?: number | null;
+
   @Column({ nullable: true })
   note?: string;
 
@@ -199,6 +211,34 @@ export class ItemEntity {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+}
+
+@Entity('item_unit')
+export class ItemUnitEntity {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ name: 'dept_id' })
+  deptId: number;
+
+  @Column({ name: 'item_id' })
+  itemId: number;
+
+  @ManyToOne(() => ItemEntity, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'item_id' })
+  item?: ItemEntity;
+
+  @Column()
+  code: string;
+
+  @Column({ type: 'enum', enum: ItemUnitStatus, default: ItemUnitStatus.InStock })
+  status: ItemUnitStatus;
+
+  @Column({ name: 'accumulated_minutes', type: 'int', default: 0 })
+  accumulatedMinutes: number;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
 }
 
 @Entity('stock_record')
@@ -335,11 +375,48 @@ export class StockOrderEntity {
   @Column({ name: 'legacy_record_id', nullable: true })
   legacyRecordId?: number;
 
+  @Column({ default: false })
+  completed: boolean;
+
+  @Column({ name: 'completed_at', type: 'datetime', nullable: true })
+  completedAt?: Date | null;
+
+  @Column({ name: 'related_order_id', nullable: true })
+  relatedOrderId?: number | null;
+
   @OneToMany(() => StockOrderItemEntity, (item) => item.order)
   items?: StockOrderItemEntity[];
 
+  @OneToMany(() => StockOrderUnitEntity, (unit) => unit.order)
+  units?: StockOrderUnitEntity[];
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
+}
+
+@Entity('stock_order_unit')
+export class StockOrderUnitEntity {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ name: 'order_id' })
+  orderId: number;
+
+  @ManyToOne(() => StockOrderEntity, (order) => order.units, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({ name: 'order_id' })
+  order?: StockOrderEntity;
+
+  @Column({ name: 'item_id' })
+  itemId: number;
+
+  @Column({ name: 'unit_id' })
+  unitId: number;
+
+  @ManyToOne(() => ItemUnitEntity, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'unit_id' })
+  unit?: ItemUnitEntity;
 }
 
 @Entity('stock_order_item')
@@ -386,6 +463,16 @@ export class EquipmentUsageEntity {
   @JoinColumn({ name: 'item_id' })
   item?: ItemEntity;
 
+  @Column({ name: 'unit_id', nullable: true })
+  unitId?: number | null;
+
+  @ManyToOne(() => ItemUnitEntity, {
+    nullable: true,
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({ name: 'unit_id' })
+  unit?: ItemUnitEntity;
+
   @Column({ name: 'operator_user_id', nullable: true })
   operatorUserId?: number;
 
@@ -422,8 +509,10 @@ export const entities = [
   UserEntity,
   ItemCategoryEntity,
   ItemEntity,
+  ItemUnitEntity,
   StockRecordEntity,
   StockOrderEntity,
   StockOrderItemEntity,
+  StockOrderUnitEntity,
   EquipmentUsageEntity,
 ];

@@ -9,6 +9,7 @@
         <el-form-item label="密码">
           <el-input v-model="loginForm.password" type="password" show-password autocomplete="off" />
         </el-form-item>
+        <el-checkbox v-model="rememberMe" style="margin-bottom:12px">记住密码（仅建议在私人专用电脑上勾选）</el-checkbox>
         <el-button type="primary" class="full" :loading="loading" @click="login">登录</el-button>
       </el-form>
     </el-card>
@@ -70,7 +71,21 @@ const depts = ref<Dept[]>([]);
 const currentAdmin = ref<AdminAccount | null>(null);
 const isSuperAdmin = computed(() => currentAdmin.value?.role === 'super');
 const mustChangePassword = computed(() => !!currentAdmin.value?.mustChangePassword);
-const loginForm = reactive({ username: '', password: '' });
+const REMEMBER_KEY = 'admin_login_remember';
+const savedLogin = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(REMEMBER_KEY) || 'null') as
+      | { username: string; password: string }
+      | null;
+  } catch {
+    return null;
+  }
+})();
+const rememberMe = ref(!!savedLogin);
+const loginForm = reactive({
+  username: savedLogin?.username || '',
+  password: savedLogin?.password || '',
+});
 const titleMap: Record<string, string> = {
   dashboard: '仪表盘',
   dept: '部门管理',
@@ -91,10 +106,18 @@ async function login() {
   try {
     const res: any = await api.adminLogin(loginForm);
     localStorage.setItem('admin_token', res.token);
+    if (rememberMe.value) {
+      localStorage.setItem(
+        REMEMBER_KEY,
+        JSON.stringify({ username: loginForm.username, password: loginForm.password }),
+      );
+    } else {
+      localStorage.removeItem(REMEMBER_KEY);
+    }
     currentAdmin.value = res.user;
     token.value = res.token;
     active.value = res.user?.mustChangePassword ? 'password' : 'dashboard';
-    loginForm.password = '';
+    if (!rememberMe.value) loginForm.password = '';
     await refreshOptions();
   } catch (error: any) {
     ElMessage.error(error?.message || '登录失败，请检查账号或密码');
@@ -525,7 +548,7 @@ const ItemPage = defineComponent({
       keyword: '',
     });
     const dialog = ref(false);
-    const form = reactive<any>({ id: 0, deptId: 0, categoryId: undefined, name: '', spec: '', unit: '件', location: '', quantity: 0, note: '' });
+    const form = reactive<any>({ id: 0, deptId: 0, categoryId: undefined, name: '', spec: '', unit: '件', location: '', quantity: 0, trackIndividually: false, maxUsageHours: null, note: '' });
     async function load() {
       const res: any = await api.items(query);
       items.value = res.list;
@@ -549,11 +572,13 @@ const ItemPage = defineComponent({
       await loadCategories(form.deptId);
     }
     function open(row?: Item) {
-      const defaults = { id: 0, deptId: query.deptId || props.depts[0]?.id || 0, categoryId: undefined, name: '', spec: '', unit: '件', location: '', quantity: 0, note: '' };
+      const defaults = { id: 0, deptId: query.deptId || props.depts[0]?.id || 0, categoryId: undefined, name: '', spec: '', unit: '件', location: '', quantity: 0, trackIndividually: false, maxUsageHours: null, note: '' };
       Object.assign(form, defaults, row || {});
       if (row && (row.quantity === undefined || row.quantity === null)) {
         form.quantity = 0;
       }
+      form.trackIndividually = !!(row && row.trackIndividually);
+      form.maxUsageHours = row && row.maxUsageMinutes ? Math.round((row.maxUsageMinutes / 60) * 10) / 10 : null;
       loadCategories(form.deptId);
       dialog.value = true;
     }
@@ -563,7 +588,22 @@ const ItemPage = defineComponent({
       if (!Number.isFinite(quantity) || quantity < 0) {
         return ElMessage.warning('当前库存不能为空，且需要大于等于 0');
       }
-      const payload = { ...form, quantity };
+      const maxUsageMinutes =
+        form.trackIndividually && form.maxUsageHours
+          ? Math.round(Number(form.maxUsageHours) * 60)
+          : '';
+      const payload = {
+        deptId: form.deptId,
+        categoryId: form.categoryId,
+        name: form.name,
+        spec: form.spec,
+        unit: form.unit,
+        location: form.location,
+        quantity,
+        note: form.note,
+        trackIndividually: form.trackIndividually,
+        maxUsageMinutes,
+      };
       await api.saveItem(payload, form.id || undefined);
       dialog.value = false;
       ElMessage.success('物品已保存');
@@ -676,11 +716,99 @@ const ItemPage = defineComponent({
       usageItem.value = null;
       usageSummary.value = null;
     }
+
+    const unitsDialog = ref(false);
+    const unitsItem = ref<Item | null>(null);
+    const units = ref<any[]>([]);
+    const unitsLoading = ref(false);
+    function unitStatusText(status: string) {
+      if (status === 'in_stock') return '在库可用';
+      if (status === 'out') return '已出库（在外）';
+      if (status === 'retired') return '已停用/到期';
+      return status;
+    }
+    function unitStatusTag(status: string) {
+      if (status === 'in_stock') return 'success';
+      if (status === 'out') return 'warning';
+      return 'info';
+    }
+    async function showUnits(row: Item) {
+      unitsItem.value = row;
+      unitsDialog.value = true;
+      await loadUnits();
+    }
+    async function loadUnits() {
+      if (!unitsItem.value) return;
+      unitsLoading.value = true;
+      try {
+        units.value = await api.itemUnits(unitsItem.value.id);
+      } catch (error: any) {
+        ElMessage.error(error?.message || '加载单台失败');
+      } finally {
+        unitsLoading.value = false;
+      }
+    }
+    async function renameUnit(u: any) {
+      const input = await ElMessageBox.prompt('修改设备编号', '编号', {
+        inputValue: u.code,
+        confirmButtonText: '保存',
+        cancelButtonText: '取消',
+      }).catch(() => null);
+      if (!input) return;
+      await api.updateUnit(u.id, { code: input.value });
+      await loadUnits();
+      await load();
+    }
+    async function toggleRetire(u: any) {
+      const target = u.status === 'retired' ? 'in_stock' : 'retired';
+      await ElMessageBox.confirm(
+        target === 'retired'
+          ? `停用 ${u.code} 号后，该设备不能再出库。确认？`
+          : `恢复 ${u.code} 号为在库可用？`,
+      );
+      await api.updateUnit(u.id, { status: target });
+      await loadUnits();
+      await load();
+    }
+    async function removeUnit(u: any) {
+      await ElMessageBox.confirm(`删除 ${u.code} 号？仅在库且无在用时可删除。`, '删除', { type: 'warning' });
+      await api.deleteUnit(u.id);
+      await loadUnits();
+      await load();
+    }
+    async function forceEndUnit(u: any) {
+      if (!unitsItem.value) return;
+      await ElMessageBox.confirm(`强制结束 ${u.code} 号的当前使用？`, '强制结束', { type: 'warning' });
+      await api.forceEndUsage(unitsItem.value.id, '管理员后台强制结束', u.id);
+      await loadUnits();
+      await load();
+    }
+    async function downloadUnitQr(u: any, format: 'png' | 'pdf') {
+      const res = await fetch(api.unitQrcodeUrl(u.id, format), {
+        headers: { Authorization: `Bearer ${localStorage.getItem('admin_token') || ''}` },
+      });
+      if (!res.ok) {
+        ElMessage.error('下载失败');
+        return;
+      }
+      const blob = await res.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `unit-${u.id}-qrcode.${format}`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+    function closeUnitsDialog() {
+      unitsDialog.value = false;
+      unitsItem.value = null;
+      units.value = [];
+    }
+
     onMounted(async () => {
       await loadQueryCategories();
       await load();
     });
-    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog, usageDialog, usageLoading, usageSummary, usageItem, showUsage, forceEndUsage, closeUsageDialog, formatUsageMinutes, formatUsageDateTime };
+    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog, usageDialog, usageLoading, usageSummary, usageItem, showUsage, forceEndUsage, closeUsageDialog, formatUsageMinutes, formatUsageDateTime, unitsDialog, unitsItem, units, unitsLoading, unitStatusText, unitStatusTag, showUnits, renameUnit, toggleRetire, removeUnit, forceEndUnit, downloadUnitQr, closeUnitsDialog };
   },
   template: `
     <div class="page-card">
@@ -700,22 +828,56 @@ const ItemPage = defineComponent({
         <el-table-column label="部门"><template #default="{row}">{{ row.dept?.name }}</template></el-table-column>
         <el-table-column label="类目"><template #default="{row}">{{ row.category?.name }}</template></el-table-column>
         <el-table-column prop="spec" label="规格" />
-        <el-table-column prop="quantity" label="库存" />
-        <el-table-column prop="unit" label="单位" />
+        <el-table-column prop="quantity" label="库存" width="80" />
+        <el-table-column prop="unit" label="单位" width="70" />
         <el-table-column prop="location" label="存放位置" />
-        <el-table-column label="使用状态" min-width="180"><template #default="{row}">
-          <el-tag v-if="row.usageOngoing" type="success">使用中 · {{ formatUsageMinutes(row.usageOngoing.durationMinutes) }}</el-tag>
-          <el-tag v-else type="info">空闲</el-tag>
+        <el-table-column label="管理方式" width="150"><template #default="{row}">
+          <template v-if="row.trackIndividually">
+            <el-tag type="warning" size="small">按单台</el-tag>
+            <div class="muted" style="margin-top:4px" v-if="row.unitStats">在库{{ row.unitStats.inStock }}·在外{{ row.unitStats.out }}·停用{{ row.unitStats.retired }}</div>
+          </template>
+          <el-tag v-else type="info" size="small">按数量</el-tag>
+        </template></el-table-column>
+        <el-table-column label="使用状态" min-width="170"><template #default="{row}">
+          <template v-if="row.trackIndividually && row.unitStats">
+            <el-tag v-if="row.unitStats.inUse" type="success">使用中 {{ row.unitStats.inUse }} 台</el-tag>
+            <el-tag v-else type="info">空闲</el-tag>
+          </template>
+          <template v-else>
+            <el-tag v-if="row.usageOngoing" type="success">使用中</el-tag>
+            <el-tag v-else type="info">空闲</el-tag>
+          </template>
           <div class="muted" style="margin-top:4px">累计 {{ formatUsageMinutes(row.usageTotalMinutes) }}</div>
         </template></el-table-column>
-        <el-table-column label="操作" width="320"><template #default="{row}">
+        <el-table-column label="操作" width="380"><template #default="{row}">
           <el-button link type="primary" @click="open(row)">编辑</el-button>
-          <el-button link type="primary" @click="showUsage(row)">使用情况</el-button>
+          <el-button v-if="row.trackIndividually" link type="primary" @click="showUnits(row)">单台管理</el-button>
+          <el-button v-else link type="primary" @click="showUsage(row)">使用情况</el-button>
           <el-button link type="success" @click="showQrCode(row)">二维码</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
           <el-button v-if="props.isSuper" link type="danger" @click="forceRemove(row)">强制删除</el-button>
         </template></el-table-column>
       </el-table>
+      <el-dialog :model-value="unitsDialog" title="单台设备管理" width="760px" @close="closeUnitsDialog">
+        <div v-if="unitsItem">
+          <p><b>{{ unitsItem.name }}</b> <span class="muted">{{ unitsItem.spec || '' }}</span></p>
+          <p class="muted">每台独立计时、独立二维码；到期或停用的设备不可出库。</p>
+          <el-table :data="units" v-loading="unitsLoading" size="small">
+            <el-table-column label="编号" prop="code" width="90" />
+            <el-table-column label="状态" width="130"><template #default="{row}"><el-tag :type="unitStatusTag(row.status)">{{ unitStatusText(row.status) }}</el-tag></template></el-table-column>
+            <el-table-column label="使用" width="120"><template #default="{row}"><span v-if="row.inUse" style="color:#16a34a">使用中</span><span v-else class="muted">空闲</span></template></el-table-column>
+            <el-table-column label="累计时长"><template #default="{row}">{{ formatUsageMinutes(row.accumulatedMinutes) }}<span v-if="row.maxUsageMinutes" class="muted"> / 上限 {{ formatUsageMinutes(row.maxUsageMinutes) }}</span></template></el-table-column>
+            <el-table-column label="操作" width="280"><template #default="{row}">
+              <el-button link type="primary" @click="renameUnit(row)">改编号</el-button>
+              <el-button link type="success" @click="downloadUnitQr(row,'pdf')">二维码</el-button>
+              <el-button v-if="row.inUse" link type="danger" @click="forceEndUnit(row)">结束使用</el-button>
+              <el-button link :type="row.status==='retired' ? 'success':'warning'" @click="toggleRetire(row)">{{ row.status==='retired' ? '恢复':'停用' }}</el-button>
+              <el-button link type="danger" @click="removeUnit(row)">删除</el-button>
+            </template></el-table-column>
+          </el-table>
+        </div>
+        <template #footer><el-button type="primary" @click="closeUnitsDialog">关闭</el-button></template>
+      </el-dialog>
       <el-dialog :model-value="usageDialog" title="设备使用情况" width="640px" @close="closeUsageDialog">
         <div v-if="usageItem">
           <p><b>{{ usageItem.name }}</b> <span class="muted">{{ usageItem.spec || '' }}</span></p>
@@ -772,7 +934,15 @@ const ItemPage = defineComponent({
           <el-form-item label="规格"><el-select v-model="form.spec" filterable allow-create default-first-option clearable placeholder="选择或输入规格"><el-option v-for="s in specOptions" :key="s" :label="s" :value="s" /></el-select></el-form-item>
           <el-form-item label="单位"><el-select v-model="form.unit" filterable allow-create default-first-option clearable placeholder="选择或输入单位"><el-option v-for="u in unitOptions" :key="u" :label="u" :value="u" /></el-select></el-form-item>
           <el-form-item label="存放位置"><el-select v-model="form.location" filterable allow-create default-first-option clearable placeholder="选择或输入存放位置"><el-option v-for="l in locationOptions" :key="l" :label="l" :value="l" /></el-select></el-form-item>
-          <el-form-item label="当前库存"><el-input-number v-model="form.quantity" :min="0" :step="1" controls-position="right" /><span class="muted" style="margin-left:8px">新建时为初始库存；编辑时直接覆盖，会作为新的当前库存。</span></el-form-item>
+          <el-form-item label="当前库存"><el-input-number v-model="form.quantity" :min="0" :step="1" controls-position="right" /><span class="muted" style="margin-left:8px">新建时为初始库存；编辑时直接覆盖。按单台管理时表示单台数量。</span></el-form-item>
+          <el-form-item label="按单台管理">
+            <el-switch v-model="form.trackIndividually" />
+            <span class="muted" style="margin-left:8px">打开后会按数量生成 1~N 号单台，每台独立计时、独立二维码、可单独停用；耗材类请关闭。</span>
+          </el-form-item>
+          <el-form-item v-if="form.trackIndividually" label="使用时长上限">
+            <el-input-number v-model="form.maxUsageHours" :min="0" :step="1" controls-position="right" />
+            <span class="muted" style="margin-left:8px">小时；单台累计使用达到上限后自动标记“到期/停用”，不能再出库。留空表示不限。</span>
+          </el-form-item>
           <el-form-item label="备注"><el-input v-model="form.note" type="textarea" /></el-form-item>
         </el-form>
         <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
@@ -901,12 +1071,36 @@ const RecordPage = defineComponent({
       </div>
       <el-table ref="tableRef" :data="records" @selection-change="onSelectionChange">
         <el-table-column type="selection" width="46" />
+        <el-table-column type="expand">
+          <template #default="{row}">
+            <div style="padding:8px 24px">
+              <p><b>项目名称：</b>{{ row.projectName || '-' }}</p>
+              <p v-if="row.unitSummary"><b>设备编号：</b>{{ row.unitSummary }}</p>
+              <el-table :data="row.items || []" size="small" style="margin:8px 0">
+                <el-table-column label="物品"><template #default="s">{{ s.row.item?.name }}</template></el-table-column>
+                <el-table-column label="规格"><template #default="s">{{ s.row.item?.spec }}</template></el-table-column>
+                <el-table-column label="数量"><template #default="s">{{ s.row.quantity }} {{ s.row.item?.unit }}</template></el-table-column>
+              </el-table>
+              <p class="muted">操作人：{{ row.operatorName }} ｜ 位置：{{ row.poiName || row.address || '无' }}</p>
+              <p class="muted" v-if="row.note">备注：{{ row.note }}</p>
+              <div class="image-list">
+                <el-image v-for="p in row.photos || []" :key="p" :src="p" style="width:90px;height:90px" fit="cover" :preview-src-list="row.photos" />
+                <el-image v-if="row.signatureUrl" :src="row.signatureUrl" style="width:160px;height:90px;background:#f8fafc" fit="contain" />
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="日期" width="150"><template #default="{row}">{{ dayjs(row.occurredAt).format('YYYY-MM-DD HH:mm') }}</template></el-table-column>
         <el-table-column label="部门"><template #default="{row}">{{ row.dept?.name }}</template></el-table-column>
         <el-table-column prop="projectName" label="项目名称" />
-        <el-table-column label="物品明细" min-width="260"><template #default="{row}">{{ row.itemSummary }}</template></el-table-column>
+        <el-table-column label="物品明细" min-width="220"><template #default="{row}">{{ row.itemSummary }}<span v-if="row.unitSummary" class="muted">（{{ row.unitSummary }}）</span></template></el-table-column>
         <el-table-column label="类型"><template #default="{row}"><el-tag :type="row.type==='in'?'success':'warning'">{{ row.type==='in'?'入库':'出库' }}</el-tag></template></el-table-column>
-        <el-table-column prop="quantity" label="合计数量" />
+        <el-table-column label="状态" width="130"><template #default="{row}">
+          <el-tag v-if="row.type==='out' && row.completed" type="success">已完成</el-tag>
+          <el-tag v-else-if="row.type==='out'" type="warning">待归还</el-tag>
+          <el-tag v-else type="info">入库</el-tag>
+        </template></el-table-column>
+        <el-table-column prop="quantity" label="合计数量" width="90" />
         <el-table-column prop="operatorName" label="操作人" />
         <el-table-column label="位置"><template #default="{row}">{{ row.poiName || row.address }}</template></el-table-column>
         <el-table-column label="操作" width="360"><template #default="{row}">

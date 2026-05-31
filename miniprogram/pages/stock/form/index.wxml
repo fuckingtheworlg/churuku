@@ -4,21 +4,53 @@
       <view class="label">类型</view>
       <view class="type">{{type === 'in' ? '入库' : '出库'}}</view>
     </view>
-    <view class="field">
-      <view class="label"><text class="required">*</text> 项目名称</view>
-      <input value="{{projectName}}" placeholder="请输入项目名称" bindinput="onProjectName" />
-    </view>
-    <view class="field">
-      <view class="label"><text class="required">*</text> 设备明细</view>
-      <view wx:for="{{lines}}" wx:for-item="line" wx:for-index="lineIndex" wx:key="*this" class="line-card">
-        <picker range="{{itemNames}}" value="{{line.itemIndex}}" data-index="{{lineIndex}}" bindchange="onLineItemChange">
-          <view>{{ itemNames[line.itemIndex] || '请选择物品' }}</view>
-        </picker>
-        <input type="number" value="{{line.quantity}}" placeholder="请输入数量" data-index="{{lineIndex}}" bindinput="onLineQuantity" />
-        <button wx:if="{{lines.length > 1}}" size="mini" data-index="{{lineIndex}}" bindtap="removeLine">删除</button>
+
+    <view wx:if="{{type === 'in'}}" class="field">
+      <view class="label">入库方式</view>
+      <view class="row">
+        <text class="muted">归还出库单</text>
+        <switch checked="{{returnMode}}" bindchange="switchReturnMode" />
       </view>
-      <button size="mini" bindtap="addLine">添加设备</button>
+      <view class="muted">开启后，选择之前的出库单进行归还；归还完成后该出库单会标记“已完成”。</view>
     </view>
+
+    <block wx:if="{{type === 'in' && returnMode}}">
+      <view class="field">
+        <view class="label"><text class="required">*</text> 选择要归还的出库单</view>
+        <picker range="{{returnLabels}}" value="{{returnIndex}}" bindchange="onReturnPick">
+          <view>{{ returnLabels[returnIndex] || '请选择出库单' }}</view>
+        </picker>
+        <view wx:if="{{!returnableOrders.length}}" class="muted">当前没有待归还的出库单。</view>
+      </view>
+    </block>
+
+    <block wx:else>
+      <view class="field">
+        <view class="label"><text class="required">*</text> 项目名称</view>
+        <input value="{{projectName}}" placeholder="请输入项目名称" bindinput="onProjectName" />
+      </view>
+      <view class="field">
+        <view class="label"><text class="required">*</text> 设备明细</view>
+        <view wx:for="{{lines}}" wx:for-item="line" wx:for-index="lineIndex" wx:key="*this" class="line-card">
+          <picker range="{{itemNames}}" value="{{line.itemIndex}}" data-index="{{lineIndex}}" bindchange="onLineItemChange">
+            <view>{{ itemNames[line.itemIndex] || '请选择物品' }}</view>
+          </picker>
+          <block wx:if="{{type === 'out' && line.trackIndividually}}">
+            <view class="muted">勾选要出库的设备（已停用/在外的不显示）</view>
+            <checkbox-group data-index="{{lineIndex}}" bindchange="onLineUnitsChange">
+              <label wx:for="{{line.units}}" wx:for-item="u" wx:key="id" class="unit-pick">
+                <checkbox value="{{u.id}}" />{{u.code}} 号
+              </label>
+            </checkbox-group>
+            <view wx:if="{{!line.units.length}}" class="muted">该物品暂无可出库的设备。</view>
+          </block>
+          <input wx:else type="number" value="{{line.quantity}}" placeholder="请输入数量" data-index="{{lineIndex}}" bindinput="onLineQuantity" />
+          <button wx:if="{{lines.length > 1}}" size="mini" data-index="{{lineIndex}}" bindtap="removeLine">删除</button>
+        </view>
+        <button size="mini" bindtap="addLine">添加设备</button>
+      </view>
+    </block>
+
     <view class="field">
       <view class="label"><text class="required">*</text> 位置</view>
       <button bindtap="chooseLocation">选择当前位置/地图位置</button>

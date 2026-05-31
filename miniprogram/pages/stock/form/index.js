@@ -7,13 +7,22 @@ function today() {
   return `${date.getFullYear()}-${m}-${d}`;
 }
 
+function emptyLine() {
+  return { itemIndex: -1, quantity: '', trackIndividually: false, units: [], selectedUnitIds: [] };
+}
+
 Page({
   data: {
     type: 'in',
     items: [],
     itemNames: [],
     projectName: '',
-    lines: [{ itemIndex: -1, quantity: '' }],
+    lines: [emptyLine()],
+    // 入库归还
+    returnMode: false,
+    returnableOrders: [],
+    returnLabels: [],
+    returnIndex: -1,
     location: {},
     photos: [],
     date: today(),
@@ -21,21 +30,70 @@ Page({
     loading: false,
   },
   onLoad(options) {
-    this.setData({ type: options.type || 'in' });
-    wx.setNavigationBarTitle({ title: this.data.type === 'in' ? '入库' : '出库' });
+    const type = options.type || 'in';
+    this.setData({ type, returnMode: type === 'in' });
+    wx.setNavigationBarTitle({ title: type === 'in' ? '入库' : '出库' });
     this.loadItems();
+    if (type === 'in') this.loadReturnable();
   },
   async loadItems() {
     const res = await request({ url: '/mini/item', data: { pageSize: 200 } });
-    this.setData({ items: res.list, itemNames: res.list.map((item) => `${item.name}（${item.quantity}${item.unit}）`) });
+    this.setData({
+      items: res.list,
+      itemNames: res.list.map((item) => `${item.name}（库存 ${item.quantity}${item.unit}）`),
+    });
+  },
+  async loadReturnable() {
+    try {
+      const list = await request({ url: '/mini/returnable-orders' });
+      this.setData({
+        returnableOrders: list,
+        returnLabels: list.map(
+          (o) => `${o.projectName || '出库单'} · ${o.itemSummary || ''}${o.unitSummary ? '（' + o.unitSummary + '）' : ''}`,
+        ),
+      });
+    } catch (error) {
+      this.setData({ returnableOrders: [], returnLabels: [] });
+    }
+  },
+  switchReturnMode(e) {
+    this.setData({ returnMode: !!e.detail.value });
+  },
+  onReturnPick(e) {
+    this.setData({ returnIndex: Number(e.detail.value) });
   },
   onProjectName(e) {
     this.setData({ projectName: e.detail.value });
   },
-  onLineItemChange(e) {
+  async onLineItemChange(e) {
     const index = Number(e.currentTarget.dataset.index);
     const lines = this.data.lines.slice();
-    lines[index].itemIndex = Number(e.detail.value);
+    const itemIndex = Number(e.detail.value);
+    const item = this.data.items[itemIndex];
+    lines[index].itemIndex = itemIndex;
+    lines[index].selectedUnitIds = [];
+    lines[index].quantity = '';
+    lines[index].trackIndividually = !!(item && item.trackIndividually);
+    lines[index].units = [];
+    this.setData({ lines });
+    if (item && item.trackIndividually && this.data.type === 'out') {
+      try {
+        const units = await request({ url: `/mini/item/${item.id}/units` });
+        const available = (units || [])
+          .filter((u) => u.status === 'in_stock' && !u.inUse)
+          .map((u) => ({ id: u.id, code: u.code }));
+        const next = this.data.lines.slice();
+        next[index].units = available;
+        this.setData({ lines: next });
+      } catch (error) {
+        // ignore
+      }
+    }
+  },
+  onLineUnitsChange(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const lines = this.data.lines.slice();
+    lines[index].selectedUnitIds = (e.detail.value || []).map(Number);
     this.setData({ lines });
   },
   onLineQuantity(e) {
@@ -45,12 +103,12 @@ Page({
     this.setData({ lines });
   },
   addLine() {
-    this.setData({ lines: [...this.data.lines, { itemIndex: -1, quantity: '' }] });
+    this.setData({ lines: [...this.data.lines, emptyLine()] });
   },
   removeLine(e) {
     const index = Number(e.currentTarget.dataset.index);
     const lines = this.data.lines.filter((_, i) => i !== index);
-    this.setData({ lines: lines.length ? lines : [{ itemIndex: -1, quantity: '' }] });
+    this.setData({ lines: lines.length ? lines : [emptyLine()] });
   },
   onDate(e) {
     this.setData({ date: e.detail.value });
@@ -106,22 +164,46 @@ Page({
       });
     });
   },
-  async submit() {
+  buildPayload() {
+    // 返回 { ok, payload, msg }
+    const isReturn = this.data.type === 'in' && this.data.returnMode;
+    if (isReturn) {
+      const order = this.data.returnableOrders[this.data.returnIndex];
+      if (!order) return { ok: false, msg: '请选择要归还的出库单' };
+      return {
+        ok: true,
+        payload: {
+          type: 'in',
+          relatedOrderId: order.id,
+          projectName: order.projectName || '归还入库',
+        },
+      };
+    }
     const projectName = (this.data.projectName || '').trim();
-    if (!projectName) {
-      wx.showToast({ title: '请填写项目名称', icon: 'none' });
-      return;
+    if (!projectName) return { ok: false, msg: '请填写项目名称' };
+    const orderItems = [];
+    for (const line of this.data.lines) {
+      const item = this.data.items[line.itemIndex];
+      if (!item) return { ok: false, msg: '请为每一行选择物品' };
+      if (this.data.type === 'out' && item.trackIndividually) {
+        if (!line.selectedUnitIds.length) {
+          return { ok: false, msg: `${item.name} 需要勾选具体设备（单台）` };
+        }
+        orderItems.push({ itemId: item.id, quantity: line.selectedUnitIds.length, unitIds: line.selectedUnitIds });
+      } else {
+        const quantity = Number(line.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          return { ok: false, msg: '请填写大于 0 的数量' };
+        }
+        orderItems.push({ itemId: item.id, quantity });
+      }
     }
-    const orderItems = this.data.lines.map((line) => ({
-      item: this.data.items[line.itemIndex],
-      quantity: Number(line.quantity),
-    }));
-    if (!orderItems.length || orderItems.some((line) => !line.item)) {
-      wx.showToast({ title: '请为每一行选择物品', icon: 'none' });
-      return;
-    }
-    if (orderItems.some((line) => !Number.isFinite(line.quantity) || line.quantity <= 0)) {
-      wx.showToast({ title: '请填写大于 0 的数量', icon: 'none' });
+    return { ok: true, payload: { type: this.data.type, projectName, items: orderItems } };
+  },
+  async submit() {
+    const built = this.buildPayload();
+    if (!built.ok) {
+      wx.showToast({ title: built.msg, icon: 'none' });
       return;
     }
     if (!this.data.location || !this.data.location.latitude) {
@@ -151,11 +233,7 @@ Page({
           photoUrls.push(await upload(this.data.photos[i]));
         } catch (error) {
           wx.hideLoading();
-          wx.showModal({
-            title: `第 ${i + 1} 张图片上传失败`,
-            content: error.message || '上传失败，请重试',
-            showCancel: false,
-          });
+          wx.showModal({ title: `第 ${i + 1} 张图片上传失败`, content: error.message || '上传失败，请重试', showCancel: false });
           this.setData({ loading: false });
           return;
         }
@@ -173,11 +251,7 @@ Page({
         signatureUrl = await upload(signaturePath);
       } catch (error) {
         wx.hideLoading();
-        wx.showModal({
-          title: '签字上传失败',
-          content: error.message || '签字上传失败，请重试',
-          showCancel: false,
-        });
+        wx.showModal({ title: '签字上传失败', content: error.message || '签字上传失败，请重试', showCancel: false });
         this.setData({ loading: false });
         return;
       }
@@ -185,10 +259,7 @@ Page({
       await request({
         url: '/stock-record',
         method: 'POST',
-        data: {
-          type: this.data.type,
-          projectName,
-          items: orderItems.map((line) => ({ itemId: line.item.id, quantity: line.quantity })),
+        data: Object.assign({}, built.payload, {
           latitude: this.data.location.latitude,
           longitude: this.data.location.longitude,
           address: this.data.location.address,
@@ -197,7 +268,7 @@ Page({
           signatureUrl,
           occurredAt: `${this.data.date}T00:00:00.000Z`,
           note: this.data.note,
-        },
+        }),
       });
       wx.hideLoading();
       wx.showToast({ title: '提交成功' });

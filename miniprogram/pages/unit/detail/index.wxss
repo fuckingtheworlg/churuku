@@ -1,0 +1,47 @@
+.name {
+  margin-bottom: 12rpx;
+  font-size: 38rpx;
+  font-weight: 700;
+}
+
+.status {
+  margin: 16rpx 0;
+}
+
+.tag {
+  display: inline-block;
+  margin-right: 12rpx;
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  color: #fff;
+}
+
+.tag.ok {
+  background: #16a34a;
+}
+
+.tag.warn {
+  background: #f59e0b;
+}
+
+.tag.gray {
+  background: #94a3b8;
+}
+
+.tag.using {
+  background: #2563eb;
+}
+
+.section-title {
+  margin-bottom: 14rpx;
+  font-weight: 700;
+}
+
+.usage-card {
+  background: #f0fdf4;
+}
+
+.usage-actions {
+  margin-top: 18rpx;
+}

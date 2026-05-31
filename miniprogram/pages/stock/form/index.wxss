@@ -38,3 +38,9 @@
   margin-right: 6rpx;
   color: #ef4444;
 }
+
+.unit-pick {
+  display: inline-block;
+  margin: 8rpx 18rpx 8rpx 0;
+  font-size: 28rpx;
+}

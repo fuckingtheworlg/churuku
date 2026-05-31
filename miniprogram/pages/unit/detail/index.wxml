@@ -1,0 +1,23 @@
+<view class="page" wx:if="{{unit}}">
+  <view class="card">
+    <view class="name">{{item.name}} · {{unit.code}} 号</view>
+    <view class="muted">{{item.spec || '无规格'}} · {{item.category.name || '未分类'}}</view>
+    <view class="status">
+      <text class="tag {{unit.status === 'in_stock' ? 'ok' : (unit.status === 'out' ? 'warn' : 'gray')}}">{{statusText}}</text>
+      <text wx:if="{{unit.inUse}}" class="tag using">使用中</text>
+    </view>
+    <view class="muted">存放位置：{{item.location || '未填写'}}</view>
+  </view>
+
+  <view class="card usage-card">
+    <view class="section-title">单台使用</view>
+    <view wx:if="{{ongoingText}}" class="muted">{{ongoingText}}</view>
+    <view class="muted">本台累计使用：{{accumulatedText}}</view>
+    <view wx:if="{{unit.maxUsageMinutes}}" class="muted">使用上限：达到后自动停用</view>
+    <view class="usage-actions">
+      <button wx:if="{{!unit.inUse && unit.status !== 'retired'}}" class="btn-primary" loading="{{loading}}" bindtap="startUsage">开始使用</button>
+      <button wx:elif="{{unit.inUse}}" loading="{{loading}}" bindtap="endUsage">结束使用</button>
+      <view wx:elif="{{unit.status === 'retired'}}" class="muted">该设备已到期/停用，不能再使用</view>
+    </view>
+  </view>
+</view>

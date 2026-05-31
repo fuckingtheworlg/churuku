@@ -40,7 +40,12 @@ Page({
   async scanItem() {
     try {
       const res = await wx.scanCode({ scanType: ['qrCode'], onlyFromCamera: false });
-      const raw = (res && res.result) || '';
+      const raw = ((res && res.result) || '').trim();
+      const unitMatch = raw.match(/unit:(\d+)/i);
+      if (unitMatch) {
+        wx.navigateTo({ url: `/pages/unit/detail/index?id=${unitMatch[1]}` });
+        return;
+      }
       const match = raw.match(/(\d+)\s*$/);
       const id = match ? match[1] : '';
       if (!id) {
