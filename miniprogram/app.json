@@ -6,6 +6,7 @@
     "pages/index/index",
     "pages/item/detail/index",
     "pages/unit/detail/index",
+    "pages/record/detail/index",
     "pages/stock/form/index",
     "pages/profile/index"
   ],

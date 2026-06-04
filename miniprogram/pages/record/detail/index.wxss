@@ -1,0 +1,64 @@
+.name {
+  margin-bottom: 12rpx;
+  font-size: 36rpx;
+  font-weight: 700;
+}
+
+.section-title {
+  margin: 28rpx 0 16rpx;
+  font-weight: 700;
+}
+
+.line {
+  padding: 8rpx 0;
+}
+
+.unit-card {
+  background: #f0fdf4;
+}
+
+.unit-code {
+  font-weight: 700;
+}
+
+.unit-actions {
+  margin-top: 14rpx;
+}
+
+.tag {
+  display: inline-block;
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #fff;
+}
+
+.tag.ok {
+  background: #16a34a;
+}
+
+.tag.warn {
+  background: #f59e0b;
+}
+
+.tag.gray {
+  background: #94a3b8;
+}
+
+.thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.thumb {
+  width: 132rpx;
+  height: 132rpx;
+  border-radius: 12rpx;
+  background: #f1f5f9;
+}
+
+.signature-thumb {
+  background: #fff;
+  border: 1rpx solid #e2e8f0;
+}

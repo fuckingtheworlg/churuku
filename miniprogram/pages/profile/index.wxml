@@ -13,6 +13,7 @@
     <view class="muted">项目：{{record.projectName || '-'}}</view>
     <view class="muted">合计数量：{{record.quantity}}</view>
     <view class="muted">位置：{{record.poiName || record.address || '无位置'}}</view>
+    <view class="detail-entry" data-id="{{record.id}}" bindtap="goDetail">查看详情 / 设备计时 ›</view>
     <view wx:if="{{record.previewUrls.length}}" class="thumbs">
       <image
         wx:for="{{record.photoUrls}}"

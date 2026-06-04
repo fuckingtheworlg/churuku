@@ -1169,6 +1169,10 @@ export class AppService {
     return this.getStockOrder(orderId, actor);
   }
 
+  async getStockRecordDetail(actor: JwtActor, id: number) {
+    return this.getStockOrder(id, actor);
+  }
+
   async listStockRecords(actor: JwtActor, query: PageQueryDto) {
     const { skip, take, page, pageSize } = takePage(query);
     const deptId = resolveDeptId(actor, query.deptId);

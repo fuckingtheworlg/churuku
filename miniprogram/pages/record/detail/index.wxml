@@ -1,0 +1,60 @@
+<view class="page" wx:if="{{record}}">
+  <view class="card">
+    <view class="name">{{record.typeText}} · {{record.projectName || '出入库'}}</view>
+    <view class="muted">日期：{{record.occurredAtText}}</view>
+    <view class="muted">操作人：{{record.operatorName || '-'}}</view>
+    <view class="muted">位置：{{record.poiName || record.address || '无位置'}}</view>
+    <view wx:if="{{record.note}}" class="muted">备注：{{record.note}}</view>
+    <view wx:if="{{record.type === 'out'}}" class="muted">
+      状态：{{record.completed ? '已完成（已归还）' : '出库待归还'}}
+    </view>
+  </view>
+
+  <view class="section-title">物品明细</view>
+  <view class="card">
+    <view wx:for="{{record.items}}" wx:for-item="line" wx:key="id" class="row line">
+      <view>{{line.item.name}}</view>
+      <view class="muted">{{line.quantity}} {{line.item.unit}}</view>
+    </view>
+    <view wx:if="{{record.unitSummary}}" class="muted">设备编号：{{record.unitSummary}}</view>
+  </view>
+
+  <block wx:if="{{record.type === 'out' && units.length}}">
+    <view class="section-title">设备计时</view>
+    <view wx:for="{{units}}" wx:for-item="u" wx:key="id" class="card unit-card">
+      <view class="row">
+        <view class="unit-code">{{u.code}} 号</view>
+        <text class="tag {{u.status === 'in_stock' ? 'ok' : (u.status === 'out' ? 'warn' : 'gray')}}">{{u.statusText}}</text>
+      </view>
+      <view wx:if="{{u.ongoingText}}" class="muted">{{u.ongoingText}}</view>
+      <view class="muted">本台累计：{{u.accumulatedText}}</view>
+      <view class="unit-actions">
+        <button wx:if="{{!u.inUse && u.status !== 'retired'}}" class="btn-primary" size="mini" loading="{{loadingUnitId === u.id}}" data-id="{{u.id}}" data-item-id="{{u.itemId}}" bindtap="startUnit">开始计时</button>
+        <button wx:elif="{{u.inUse}}" size="mini" loading="{{loadingUnitId === u.id}}" data-id="{{u.id}}" data-item-id="{{u.itemId}}" bindtap="endUnit">结束计时</button>
+        <text wx:elif="{{u.status === 'retired'}}" class="muted">已到期/停用</text>
+      </view>
+    </view>
+  </block>
+
+  <view wx:if="{{previewUrls.length}}" class="section-title">照片 / 签字</view>
+  <view wx:if="{{previewUrls.length}}" class="thumbs">
+    <image
+      wx:for="{{photoUrls}}"
+      wx:for-item="photo"
+      wx:key="*this"
+      class="thumb"
+      src="{{photo}}"
+      mode="aspectFill"
+      data-current="{{photo}}"
+      bindtap="previewImage"
+    />
+    <image
+      wx:if="{{signatureUrl}}"
+      class="thumb signature-thumb"
+      src="{{signatureUrl}}"
+      mode="aspectFit"
+      data-current="{{signatureUrl}}"
+      bindtap="previewImage"
+    />
+  </view>
+</view>

@@ -382,6 +382,12 @@ export class AppController {
   }
 
   @UseGuards(MiniGuard)
+  @Get('mini/stock-record/:id')
+  miniGetStockRecord(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.getStockRecordDetail(requireActor(req), Number(id));
+  }
+
+  @UseGuards(MiniGuard)
   @Get('mini/stock-record')
   miniListStockRecord(@Req() req: AuthedRequest, @Query() query: PageQueryDto) {
     return this.service.listStockRecords(requireActor(req), query);

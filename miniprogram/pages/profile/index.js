@@ -52,6 +52,11 @@ Page({
       urls: record.previewUrls,
     });
   },
+  goDetail(event) {
+    const { id } = event.currentTarget.dataset;
+    if (!id) return;
+    wx.navigateTo({ url: `/pages/record/detail/index?id=${id}` });
+  },
   logout() {
     wx.removeStorageSync('token');
     wx.removeStorageSync('user');
