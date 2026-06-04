@@ -798,6 +798,29 @@ const ItemPage = defineComponent({
       link.click();
       URL.revokeObjectURL(link.href);
     }
+    const unitQrDialog = ref(false);
+    const unitQrUnit = ref<any>(null);
+    const unitQrImgUrl = ref('');
+    async function showUnitQr(u: any) {
+      unitQrUnit.value = u;
+      unitQrDialog.value = true;
+      unitQrImgUrl.value = '';
+      const res = await fetch(api.unitQrcodeUrl(u.id, 'png'), {
+        headers: { Authorization: `Bearer ${localStorage.getItem('admin_token') || ''}` },
+      });
+      if (!res.ok) {
+        ElMessage.error('二维码加载失败');
+        return;
+      }
+      const blob = await res.blob();
+      unitQrImgUrl.value = URL.createObjectURL(blob);
+    }
+    function closeUnitQrDialog() {
+      if (unitQrImgUrl.value) URL.revokeObjectURL(unitQrImgUrl.value);
+      unitQrImgUrl.value = '';
+      unitQrDialog.value = false;
+      unitQrUnit.value = null;
+    }
     function closeUnitsDialog() {
       unitsDialog.value = false;
       unitsItem.value = null;
@@ -808,7 +831,7 @@ const ItemPage = defineComponent({
       await loadQueryCategories();
       await load();
     });
-    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog, usageDialog, usageLoading, usageSummary, usageItem, showUsage, forceEndUsage, closeUsageDialog, formatUsageMinutes, formatUsageDateTime, unitsDialog, unitsItem, units, unitsLoading, unitStatusText, unitStatusTag, showUnits, renameUnit, toggleRetire, removeUnit, forceEndUnit, downloadUnitQr, closeUnitsDialog };
+    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog, usageDialog, usageLoading, usageSummary, usageItem, showUsage, forceEndUsage, closeUsageDialog, formatUsageMinutes, formatUsageDateTime, unitsDialog, unitsItem, units, unitsLoading, unitStatusText, unitStatusTag, showUnits, renameUnit, toggleRetire, removeUnit, forceEndUnit, downloadUnitQr, closeUnitsDialog, unitQrDialog, unitQrUnit, unitQrImgUrl, showUnitQr, closeUnitQrDialog };
   },
   template: `
     <div class="page-card">
@@ -869,7 +892,7 @@ const ItemPage = defineComponent({
             <el-table-column label="累计时长"><template #default="{row}">{{ formatUsageMinutes(row.accumulatedMinutes) }}<span v-if="row.maxUsageMinutes" class="muted"> / 上限 {{ formatUsageMinutes(row.maxUsageMinutes) }}</span></template></el-table-column>
             <el-table-column label="操作" width="280"><template #default="{row}">
               <el-button link type="primary" @click="renameUnit(row)">改编号</el-button>
-              <el-button link type="success" @click="downloadUnitQr(row,'pdf')">二维码</el-button>
+              <el-button link type="success" @click="showUnitQr(row)">二维码</el-button>
               <el-button v-if="row.inUse" link type="danger" @click="forceEndUnit(row)">结束使用</el-button>
               <el-button link :type="row.status==='retired' ? 'success':'warning'" @click="toggleRetire(row)">{{ row.status==='retired' ? '恢复':'停用' }}</el-button>
               <el-button link type="danger" @click="removeUnit(row)">删除</el-button>
@@ -877,6 +900,21 @@ const ItemPage = defineComponent({
           </el-table>
         </div>
         <template #footer><el-button type="primary" @click="closeUnitsDialog">关闭</el-button></template>
+      </el-dialog>
+      <el-dialog :model-value="unitQrDialog" title="设备二维码" width="380px" @close="closeUnitQrDialog">
+        <div style="text-align:center" v-if="unitQrUnit">
+          <p><b>{{ unitsItem && unitsItem.name }} · {{ unitQrUnit.code }} 号</b></p>
+          <div style="margin:12px 0">
+            <img v-if="unitQrImgUrl" :src="unitQrImgUrl" style="width:260px;height:260px" />
+            <span v-else class="muted">生成中…</span>
+          </div>
+          <p class="muted">小程序「扫码出入库」扫描后进入该设备详情，可单独计时。</p>
+        </div>
+        <template #footer>
+          <el-button @click="downloadUnitQr(unitQrUnit,'png')" :disabled="!unitQrUnit">下载 PNG</el-button>
+          <el-button @click="downloadUnitQr(unitQrUnit,'pdf')" :disabled="!unitQrUnit">下载打印 PDF</el-button>
+          <el-button type="primary" @click="closeUnitQrDialog">关闭</el-button>
+        </template>
       </el-dialog>
       <el-dialog :model-value="usageDialog" title="设备使用情况" width="640px" @close="closeUsageDialog">
         <div v-if="usageItem">
