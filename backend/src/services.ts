@@ -1000,6 +1000,39 @@ export class AppService {
     return { buffer: png, contentType: 'image/png', ext: 'png' };
   }
 
+  async buildUnitsQrCodePdf(actor: JwtActor, itemId: number) {
+    const item = await this.getItem(itemId, actor);
+    const units = await this.unitRepo.find({ where: { itemId: item.id }, order: { id: 'ASC' } });
+    if (!units.length) throw new BadRequestException('该物品暂无单台设备');
+    const doc = new PDFDocument({ size: 'A4', margin: 36 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(Buffer.from(c)));
+    const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+    this.applyPdfFont(doc);
+    const usableW = doc.page.width - 72;
+    const cols = 2;
+    const perPage = 8;
+    const cellW = usableW / cols;
+    const cellH = 200;
+    const qrSize = 150;
+    let idx = 0;
+    for (const u of units) {
+      const posInPage = idx % perPage;
+      if (idx > 0 && posInPage === 0) doc.addPage();
+      const col = posInPage % cols;
+      const row = Math.floor(posInPage / cols);
+      const x = 36 + col * cellW;
+      const y = 36 + row * cellH;
+      const png = await QRCode.toBuffer(`unit:${u.id}`, { width: 300, margin: 1, errorCorrectionLevel: 'M' });
+      doc.image(png, x + (cellW - qrSize) / 2, y, { fit: [qrSize, qrSize] });
+      doc.fontSize(11).text(`${item.name} · ${u.code} 号`, x, y + qrSize + 6, { width: cellW, align: 'center' });
+      doc.fontSize(9).text(`${item.spec || ''}`.trim(), x, y + qrSize + 24, { width: cellW, align: 'center' });
+      idx += 1;
+    }
+    doc.end();
+    return { buffer: await done, contentType: 'application/pdf', ext: 'pdf' };
+  }
+
   async createStockRecord(actor: JwtActor, dto: StockRecordDto) {
     if (dto.type === StockType.In && dto.relatedOrderId) {
       return this.createReturnRecord(actor, dto);

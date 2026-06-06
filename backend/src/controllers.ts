@@ -304,6 +304,20 @@ export class AppController {
   }
 
   @UseGuards(AdminGuard)
+  @Get('item/:id/units-qrcode')
+  async exportUnitsQrCode(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const file = await this.service.buildUnitsQrCodePdf(requireActor(req), Number(id));
+    const filename = `item-${id}-units-qrcode.pdf`;
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(file.buffer);
+  }
+
+  @UseGuards(AdminGuard)
   @Get('item-unit/:id/qrcode')
   async exportUnitQrCode(
     @Req() req: AuthedRequest,

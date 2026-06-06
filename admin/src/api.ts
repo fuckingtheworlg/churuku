@@ -177,6 +177,7 @@ export const api = {
   deleteItem: (id: number, force = false) => request.delete(`/item/${id}`, { params: { force } }),
   itemQrcodeUrl: (id: number, format: 'png' | 'pdf' = 'png') => `/api/item/${id}/qrcode?format=${format}`,
   unitQrcodeUrl: (id: number, format: 'png' | 'pdf' = 'png') => `/api/item-unit/${id}/qrcode?format=${format}`,
+  itemUnitsQrcodeUrl: (id: number) => `/api/item/${id}/units-qrcode`,
   itemUsage: (id: number) => request.get(`/item/${id}/usage`),
   itemUnits: (id: number) => request.get(`/item/${id}/units`),
   updateUnit: (id: number, data: Record<string, unknown>) => request.patch(`/item-unit/${id}`, data),

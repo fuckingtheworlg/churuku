@@ -798,6 +798,22 @@ const ItemPage = defineComponent({
       link.click();
       URL.revokeObjectURL(link.href);
     }
+    async function downloadAllUnitQr() {
+      if (!unitsItem.value) return;
+      const res = await fetch(api.itemUnitsQrcodeUrl(unitsItem.value.id), {
+        headers: { Authorization: `Bearer ${localStorage.getItem('admin_token') || ''}` },
+      });
+      if (!res.ok) {
+        ElMessage.error('批量下载失败');
+        return;
+      }
+      const blob = await res.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${unitsItem.value.name}-全部二维码.pdf`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
     const unitQrDialog = ref(false);
     const unitQrUnit = ref<any>(null);
     const unitQrImgUrl = ref('');
@@ -831,7 +847,7 @@ const ItemPage = defineComponent({
       await loadQueryCategories();
       await load();
     });
-    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog, usageDialog, usageLoading, usageSummary, usageItem, showUsage, forceEndUsage, closeUsageDialog, formatUsageMinutes, formatUsageDateTime, unitsDialog, unitsItem, units, unitsLoading, unitStatusText, unitStatusTag, showUnits, renameUnit, toggleRetire, removeUnit, forceEndUnit, downloadUnitQr, closeUnitsDialog, unitQrDialog, unitQrUnit, unitQrImgUrl, showUnitQr, closeUnitQrDialog };
+    return { props, items, categories, queryCategories, unitOptions, specOptions, locationOptions, query, dialog, form, load, loadCategories, changeQueryDept, changeFormDept, open, save, remove, forceRemove, qrDialog, qrItem, qrImgUrl, showQrCode, downloadQr, closeQrDialog, usageDialog, usageLoading, usageSummary, usageItem, showUsage, forceEndUsage, closeUsageDialog, formatUsageMinutes, formatUsageDateTime, unitsDialog, unitsItem, units, unitsLoading, unitStatusText, unitStatusTag, showUnits, renameUnit, toggleRetire, removeUnit, forceEndUnit, downloadUnitQr, downloadAllUnitQr, closeUnitsDialog, unitQrDialog, unitQrUnit, unitQrImgUrl, showUnitQr, closeUnitQrDialog };
   },
   template: `
     <div class="page-card">
@@ -884,6 +900,9 @@ const ItemPage = defineComponent({
       <el-dialog :model-value="unitsDialog" title="单台设备管理" width="760px" @close="closeUnitsDialog">
         <div v-if="unitsItem">
           <p><b>{{ unitsItem.name }}</b> <span class="muted">{{ unitsItem.spec || '' }}</span></p>
+          <div style="margin-bottom:10px">
+            <el-button type="primary" size="small" @click="downloadAllUnitQr">批量下载二维码（PDF）</el-button>
+          </div>
           <p class="muted">每台独立计时、独立二维码；到期或停用的设备不可出库。</p>
           <el-table :data="units" v-loading="unitsLoading" size="small">
             <el-table-column label="编号" prop="code" width="90" />
