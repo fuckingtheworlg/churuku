@@ -96,6 +96,10 @@ export class AppService {
       await this.adminRepo.save(existed);
     }
     await this.migrateLegacyRecords();
+    await this.unitRepo.update(
+      { status: ItemUnitStatus.Retired },
+      { status: ItemUnitStatus.InStock, retired: true },
+    );
   }
 
   async adminLogin(dto: LoginDto) {
@@ -494,6 +498,7 @@ export class AppService {
     const inStock = await this.unitRepo.countBy({
       itemId,
       status: ItemUnitStatus.InStock,
+      retired: false,
     });
     item.quantity = inStock;
     await this.itemRepo.save(item);
@@ -535,6 +540,23 @@ export class AppService {
     return rows.map((row) => this.presentStockOrder(row));
   }
 
+  private async capUsageAtLimit(
+    session: EquipmentUsageEntity,
+    unit: ItemUnitEntity,
+    max: number,
+  ) {
+    const allowed = Math.max(0, max - unit.accumulatedMinutes);
+    const started = new Date(session.startedAt).getTime();
+    session.endedAt = new Date(started + allowed * 60000);
+    session.durationMinutes = allowed;
+    const note = '达到使用上限自动结束';
+    session.note = session.note ? `${session.note}；${note}` : note;
+    await this.usageRepo.save(session);
+    unit.accumulatedMinutes += allowed;
+    unit.retired = true;
+    await this.unitRepo.save(unit);
+  }
+
   private async buildUnitViews(item: ItemEntity) {
     const units = await this.unitRepo.find({
       where: { itemId: item.id },
@@ -549,20 +571,31 @@ export class AppService {
     open.forEach((session) => {
       if (session.unitId && !openMap.has(session.unitId)) openMap.set(session.unitId, session);
     });
+    const max = item.maxUsageMinutes && item.maxUsageMinutes > 0 ? item.maxUsageMinutes : 0;
     const now = Date.now();
-    return units.map((u) => {
-      const session = openMap.get(u.id);
+    const views: any[] = [];
+    for (const u of units) {
+      let session = openMap.get(u.id) || null;
+      if (
+        session &&
+        max &&
+        u.accumulatedMinutes + Math.round((now - new Date(session.startedAt).getTime()) / 60000) >= max
+      ) {
+        await this.capUsageAtLimit(session, u, max);
+        session = null;
+      }
       const ongoingMinutes = session
         ? Math.max(0, Math.round((now - new Date(session.startedAt).getTime()) / 60000))
         : 0;
-      return {
+      views.push({
         id: u.id,
         itemId: u.itemId,
         code: u.code,
-        status: u.status,
+        status: u.retired ? 'retired' : u.status,
+        retired: u.retired,
         inUse: !!session,
         accumulatedMinutes: u.accumulatedMinutes + ongoingMinutes,
-        maxUsageMinutes: item.maxUsageMinutes ?? null,
+        maxUsageMinutes: max || null,
         ongoing: session
           ? {
               operatorName: session.operatorName || session.operatorUser?.realName || '未知',
@@ -570,8 +603,9 @@ export class AppService {
               durationMinutes: ongoingMinutes,
             }
           : null,
-      };
-    });
+      });
+    }
+    return views;
   }
 
   async updateUnit(actor: JwtActor, unitId: number, dto: ItemUnitUpdateDto) {
@@ -582,10 +616,8 @@ export class AppService {
       unit.code = dto.code.trim();
     }
     if (dto.status !== undefined) {
-      if (unit.status === ItemUnitStatus.Out && dto.status === ItemUnitStatus.InStock) {
-        throw new BadRequestException('该设备在外（已出库），请通过入库归还');
-      }
-      unit.status = dto.status;
+      if (dto.status === ItemUnitStatus.Retired) unit.retired = true;
+      else if (dto.status === ItemUnitStatus.InStock) unit.retired = false;
     }
     await this.unitRepo.save(unit);
     await this.syncItemQuantity(unit.itemId);
@@ -681,9 +713,9 @@ export class AppService {
           unitStatsMap.get(u.itemId) ||
           { total: 0, inStock: 0, out: 0, retired: 0, inUse: 0, totalMinutes: 0 };
         stat.total += 1;
-        if (u.status === ItemUnitStatus.InStock) stat.inStock += 1;
+        if (u.retired) stat.retired += 1;
+        else if (u.status === ItemUnitStatus.InStock) stat.inStock += 1;
         else if (u.status === ItemUnitStatus.Out) stat.out += 1;
-        else if (u.status === ItemUnitStatus.Retired) stat.retired += 1;
         let minutes = u.accumulatedMinutes;
         if (inUseUnitIds.has(u.id)) {
           stat.inUse += 1;
@@ -768,38 +800,41 @@ export class AppService {
   ) {
     const endedAt = new Date();
     const startedAt = new Date(open.startedAt);
-    const durationMinutes = Math.max(
+    let durationMinutes = Math.max(
       0,
       Math.round((endedAt.getTime() - startedAt.getTime()) / 60000),
     );
+    const unit = open.unitId ? await this.unitRepo.findOneBy({ id: open.unitId }) : null;
+    const max = item.maxUsageMinutes && item.maxUsageMinutes > 0 ? item.maxUsageMinutes : 0;
+    let capped = false;
+    if (unit && max) {
+      const allowed = Math.max(0, max - unit.accumulatedMinutes);
+      if (durationMinutes > allowed) {
+        durationMinutes = allowed;
+        capped = true;
+      }
+    }
     open.endedAt = endedAt;
     open.durationMinutes = durationMinutes;
-    if (extraNote) {
-      open.note = open.note ? `${open.note}；${extraNote}` : extraNote;
+    const note = capped ? `${extraNote ? extraNote + '；' : ''}达到使用上限自动封顶` : extraNote;
+    if (note) {
+      open.note = open.note ? `${open.note}；${note}` : note;
     }
     await this.usageRepo.save(open);
-    if (open.unitId) {
-      const unit = await this.unitRepo.findOneBy({ id: open.unitId });
-      if (unit) {
-        unit.accumulatedMinutes += durationMinutes;
-        if (
-          item.maxUsageMinutes &&
-          item.maxUsageMinutes > 0 &&
-          unit.accumulatedMinutes >= item.maxUsageMinutes &&
-          unit.status !== ItemUnitStatus.Retired
-        ) {
-          unit.status = ItemUnitStatus.Retired;
-        }
-        await this.unitRepo.save(unit);
-        await this.syncItemQuantity(unit.itemId);
+    if (unit) {
+      unit.accumulatedMinutes += durationMinutes;
+      if (max && unit.accumulatedMinutes >= max) {
+        unit.retired = true;
       }
+      await this.unitRepo.save(unit);
+      await this.syncItemQuantity(unit.itemId);
     }
   }
 
   async startUsage(actor: JwtActor, dto: UsageActionDto) {
     const item = await this.getItem(dto.itemId, actor);
     const unit = await this.resolveUsageUnit(item, dto.unitId);
-    if (unit && unit.status === ItemUnitStatus.Retired) {
+    if (unit && unit.retired) {
       throw new BadRequestException('该设备已到期/停用，不能再使用');
     }
     const open = await this.usageRepo.findOne({
@@ -998,7 +1033,7 @@ export class AppService {
         }
         for (const u of units) {
           if (u.itemId !== line.item.id) throw new BadRequestException('设备与物品不匹配');
-          if (u.status === ItemUnitStatus.Retired) {
+          if (u.retired) {
             throw new BadRequestException(`${line.item.name} ${u.code} 号已到期/停用，不能出库`);
           }
           if (u.status === ItemUnitStatus.Out) {
@@ -1121,7 +1156,8 @@ export class AppService {
           item && item.maxUsageMinutes && item.maxUsageMinutes > 0
             ? unit.accumulatedMinutes >= item.maxUsageMinutes
             : false;
-        unit.status = overLimit ? ItemUnitStatus.Retired : ItemUnitStatus.InStock;
+        unit.status = ItemUnitStatus.InStock;
+        if (overLimit) unit.retired = true;
         await manager.save(ItemUnitEntity, unit);
         await manager.save(
           StockOrderUnitEntity,

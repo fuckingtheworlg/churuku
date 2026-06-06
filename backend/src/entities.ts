@@ -234,6 +234,9 @@ export class ItemUnitEntity {
   @Column({ type: 'enum', enum: ItemUnitStatus, default: ItemUnitStatus.InStock })
   status: ItemUnitStatus;
 
+  @Column({ default: false })
+  retired: boolean;
+
   @Column({ name: 'accumulated_minutes', type: 'int', default: 0 })
   accumulatedMinutes: number;
 
