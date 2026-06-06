@@ -92,11 +92,17 @@
 
 .actions {
   position: fixed;
-  right: 24rpx;
-  bottom: 140rpx;
-  left: 24rpx;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 10;
   display: flex;
   gap: 20rpx;
+  padding: 16rpx 24rpx;
+  padding-bottom: calc(16rpx + constant(safe-area-inset-bottom));
+  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
+  background: #ffffff;
+  box-shadow: 0 -6rpx 20rpx rgba(15, 23, 42, 0.08);
 }
 
 .actions button {
